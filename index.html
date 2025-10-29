@@ -190,6 +190,8 @@ Zpx; }
 }
 
 </style>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 </head>
 <body>
 <h1 onclick="resetToHome()">🎨 PicturePass 🎨</h1><div class="emojiFlow">🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭</div>
@@ -1245,5 +1247,30 @@ function trySaveCommunityFinal(room){
 }
 
 </script>
+
+<script>
+// Silent Anonymous Auth — no UI change for players
+(function() {
+  try {
+    var auth = firebase.auth();
+    auth.onAuthStateChanged(function(user) {
+      if (!user) {
+        auth.signInAnonymously().catch(function(e) {
+          console.error("Anonymous sign-in failed:", e);
+        });
+      } else {
+        // Optional: available for ownership/membership logic later
+        window.currentUid = user.uid;
+      }
+    });
+    // Ensure an immediate attempt as the page loads
+    auth.signInAnonymously().catch(function(){});
+  } catch (e) {
+    console.error("Auth init error:", e);
+  }
+})();
+</script>
+
+
 </body>
 </html>
