@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="upgrade-insecure-requests" http-equiv="Content-Security-Policy"/>
+<title>🎨 Telestrations Game 🎨</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --panel: #ffffff;
+    --text: #1e1e1e;
+    --muted: #5b6b7a;
+    --primary: #007bff;
+    --primary-dark: #0065d4;
+    --border: #cbd5e0;
+    --accent: #0b66b2;
+    --chalk-green: #0dbb7e;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background-color: var(--bg); color: var(--text); text-align: center; margin: 0; padding: 0; }
+  h1 { color: var(--accent); margin: 22px 0 10px; cursor: pointer; font-weight: 600; }
+  .container { max-width: 980px; margin: 14px auto; background: var(--panel); padding: 22px; border-radius: 14px; border: 2px solid var(--border); box-shadow: 0 4px 10px rgba(0,0,0,0.08); position: relative; }
+  button { background-color: var(--primary); color: #fff; border: none; padding: 10px 16px; border-radius: 10px; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease, background-color .2s ease; font-weight: 600; }
+  button:hover { background-color: var(--primary-dark); transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.12); }
+  input { padding: 10px 12px; margin: 6px; width: 80%; max-width: 520px; border-radius: 10px; border: 2px solid var(--border); outline: none; }
+  input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0,123,255,.15); }
+  canvas {
+    border: 2px solid #90a4b8;
+    border-radius: 12px;
+    background: #fff;
+    touch-action: none;
+    max-width: 100%;
+    margin-top: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .hidden { display: none; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  #roomBanner { display: none; background: #eef4fb; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 8px 0; font-weight: 600; color: var(--accent); }
+
+  .turnOrderBox { display: none; max-width: 420px; margin: 16px auto 0; background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; text-align: center; }
+  .turnOrderBox h4 { margin: 0 0 8px; color: var(--accent); font-weight: 600; }
+  .turnOrderList { padding: 0; margin: 0; text-align: center; }
+  .turnOrderList li { list-style: none; padding: 4px 0; font-size: 15px; }
+  .turnOrderList li.current::before { content: "→ "; color: var(--accent); font-weight: 700; }
+  .activePen { background-color: #22c55e !important; }
+  .disconnected { color: #9aa7b4; opacity: .7; }
+
+  @media (min-width: 768px) {
+    #usernameInput { width: 48%; }
+    .infoPanel { width: 70%; margin: 0 auto; }
+    #guessInput { width: 56%; }
+  }
+  .infoPanel { margin-top: 12px; padding: 12px; border-radius: 12px; background: #f1f5f9; border: 1px solid var(--border); color: #0b3f6b; text-align: left; }
+  .infoPanel h4 { margin: 0 0 8px; color: var(--accent); text-align: center; font-weight: 600; }
+  .infoPanel ul { margin: 0; padding-left: 18px; }
+  .infoPanel li { margin: 5px 0; list-style: disc; }
+
+  #resultsList { text-align: center; }
+  .resultStepHeader { text-align: center; font-weight: 700; color: var(--accent); margin: 22px 0 12px; font-size: 1.1em; }
+  .resultDrawing { display: block; margin: 10px auto; border: 2px solid #90a4b8; border-radius: 12px; background-color: #fff; padding: 6px; max-width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .resultGuess { display: inline-block; background-color: #f0f6ff; border: 1px solid #b6d4ff; border-radius: 12px; padding: 10px 16px; text-align: center; color: var(--text); margin: 14px auto; max-width: 92%; word-wrap: break-word; }
+  .resultDivider { margin: 30px 0; border-top: 1px dotted #c3d3e6; }
+
+  #restartBox { margin-top: 20px; background: #f1f5f9; border: 1px solid var(--border); border-radius: 12px; padding: 16px; max-width: 520px; margin-left: auto; margin-right: auto; }
+
+  @media (max-width: 767px) {
+    #drawControlsTop, #drawControlsBottom { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+  }
+
+  /* Localized solid-blue turn banner (replaces Waiting text) */
+  #turnBanner { display: none; margin: 8px auto 10px; background: var(--green-oval-bg); border: 2px solid var(--green-oval-border); color: var(--green-text-dark); font-weight: 600; padding: 8px 18px; border-radius: 9999px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); width: fit-content; }
+
+  /* Guess image border matches drawing canvas */
+  #guessImage { max-width: 100%; border: 2px solid #90a4b8; border-radius: 12px; margin-top: 10px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+  /* Confetti canvas overlay */
+  #confettiCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; }
+
+  
+
+  /* --------- Community Doodle styles --------- */
+  #communityDoodleSection { margin-top: 18px; }
+  #cdTitle {
+    margin: 8px 0 4px;
+    font-size: 1.3em;
+    font-weight: 800;
+    letter-spacing: 1px;
+  }
+  /* multicolor but semi-dark letters */
+  .cd-letter:nth-child(5n+1){ color:#1d4ed8; }  /* blue-700 */
+  .cd-letter:nth-child(5n+2){ color:#2563eb; }  /* blue-600 */
+  .cd-letter:nth-child(5n+3){ color:#7c3aed; }  /* violet-600 */
+  .cd-letter:nth-child(5n+4){ color:#b91c1c; }  /* red-700 */
+  .cd-letter:nth-child(5n+5){ color:#0f766e; }  /* teal-700 */
+
+  #cdDesc { color: var(--accent); font-size: 0.9em; margin-bottom: 6px; }
+  #cdColorRow { font-size: 0.9em; margin-top: 6px; }
+  #cdSwatch { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid #222; vertical-align:middle; margin: 0 6px; }
+
+  #communityCanvas {
+    width: 720px;
+    height: 560px;
+    background: #0f0f12;
+    border: 2px solid #2a2a2a;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.20);
+  }
+  /* keep same aspect ratio as the main draw canvas on small screens */
+  @media (max-width: 820px){
+    #communityCanvas { width: 96%; height: auto; aspect-ratio: 720 / 560; }
+  }
+
+  .chalk-tips { color: #a3ffcf; font-size: 12px; margin-top: 6px; }
+  .no-select { user-select:none; -webkit-user-select:none; -ms-user-select:none; }
+
+  :root {
+    --green-oval-bg: #BBF7D0;      /* light green background */
+    --green-oval-border: #22c55e;  /* medium green border */
+    --green-text-dark: #14532d;    /* dark readable green */
+  }
+  .emojiFlow {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 9999px;
+    background: var(--green-oval-bg);
+    border: 2px solid var(--green-oval-border);
+    color: var(--green-text-dark);
+    font-weight: 700;
+  }
+
+  /* Results Summary green theming */
+  .finalWordRow {
+    font-weight: 700;
+    color: var(--green-text-dark);
+    font-size: 1.25em;
+  }
+  /* Guesses as green ovals */
+  .resultGuess {
+    display: inline-block;
+    background-color: var(--green-oval-bg) !important;
+    border: 2px solid var(--green-oval-border) !important;
+    border-radius: 9999px !important;
+    padding: 10px 18px !important;
+    color: var(--green-text-dark) !important;
+    margin: 14px auto;
+    max-width: 92%;
+    word-wrap: break-word;
+    font-size: 1.05em; /* slightly bigger */
+    font-weight: 600;
+  }
+  /* Restart panel green */
+  #restartBox {
+    background: #DBEAFE; /* blue-100 */
+    border: 2px solid #3B82F6; /* blue-500 */
+    color: #1E40AF; /* blue-800 */
+  }
+  #restartBox button {
+    background: #3B82F6; /* blue-500 */
+  }
+  #restartBox button:hover {
+    filter: brightness(0.95);
+  }
+
+  /* Make the Original Word/Phrase value look like the green guess pill */
+  
+
+
+  /* Make the Original Word/Phrase label + value one green pill */
+  #finalWordPill {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 9999px;
+    background: var(--green-oval-bg);
+    border: 2px solid var(--green-oval-border);
+    color: var(--green-text-dark);
+  }
+  #finalWordPill .pillLabel {
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  #finalWordPill #finalWord {
+    font-weight: 700;
+  }
+
+</style>
+</head>
+<body>
+<h1 onclick="resetToHome()">🎨 Telestrations Game 🎨</h1><div class="emojiFlow">🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭</div>
+<div id="roomBanner">Room Code: <span id="bannerCode"></span></div>
+<!-- Home -->
+<div class="container" id="homeScreen">
+<h3>Enter a username:</h3>
+<input id="usernameInput" maxlength="25" placeholder="Your username" type="text"/><br/><br/>
+<button onclick="createRoom()">Create Room</button>
+<button onclick="joinRoomPrompt()">Join Room</button>
+<div class="infoPanel">
+<h4>Here's how the game works:</h4>
+<ul>
+<li>Host creates a room and picks the first word/phrase.</li>
+<li>Turns alternate: draw (80s) → guess (40s).</li>
+<li>Submit anytime; timer auto-submits when it ends.</li>
+<li>See the full chain at the end!</li>
+<li>Optional: Use the Community Doodle while you wait—everyone not taking a turn can sketch together in real time.</li></ul>
+</div>
+</div>
+<!-- Lobby -->
+<div class="container hidden" id="lobbyScreen">
+<h2>Room Code: <span id="roomCodeDisplay"></span></h2>
+<ul id="playerList"></ul>
+<p class="muted" id="lobbyMsg"></p>
+<button class="hidden" id="startGameBtn" onclick="startGame()">Start Game</button>
+<div class="infoPanel">
+<h4>Here's how the game works:</h4>
+<ul>
+<li>Host starts once everyone joins (2–15 players).</li>
+<li>Turns alternate: draw (80s) → guess (40s).</li>
+<li>Submit anytime; timer auto-submits when it ends.</li>
+<li>See the full chain at the end!</li>
+<li>Optional: Use the Community Doodle while you wait—everyone not taking a turn can sketch together in real time.</li></ul>
+</div>
+<div class="turnOrderBox"><h4>Turn Order</h4><ul class="turnOrderList"></ul></div>
+</div>
+<!-- Word select -->
+<div class="container hidden" id="wordSelectScreen">
+<h3>Pick a Word or Phrase</h3>
+<input id="customWord" placeholder="Enter custom word/phrase" type="text"/><br/><br/>
+<button onclick="suggestWord()">Suggest Word/Phrase</button>
+<button onclick="confirmWord()">Confirm &amp; Start Round</button>
+<div class="turnOrderBox"><h4>Turn Order</h4><ul class="turnOrderList"></ul></div>
+</div>
+<!-- Drawing -->
+<div class="container hidden" id="drawingScreen">
+<h3 id="drawPrompt"></h3>
+<div id="drawControlsTop">
+<button id="smallPen" onclick="setPenSize(2)">Small</button>
+<button id="mediumPen" onclick="setPenSize(6)">Medium</button>
+<button id="largePen" onclick="setPenSize(12)">Large</button>
+</div>
+<div id="drawControlsBottom" style="margin-top:8px;">
+<button onclick="undo()">Undo</button>
+<button onclick="clearCanvas()">Clear</button>
+<span class="timer" id="drawTimer">80s</span>
+<button onclick="submitDrawing(false)">Submit Drawing</button>
+</div>
+<canvas height="460" id="drawCanvas" width="720"></canvas>
+<div class="turnOrderBox"><h4>Turn Order</h4><ul class="turnOrderList"></ul></div>
+</div>
+<!-- Guessing -->
+<div class="container hidden" id="guessScreen">
+<h3>Guess the drawing!</h3>
+<input id="guessInput" placeholder="Type your guess here" type="text"/>
+<div style="margin-top:8px;">
+<span class="timer" id="guessTimer">40s</span>
+<button id="submitGuessBtn" onclick="return submitGuess()">Submit Guess</button>
+</div>
+<img id="guessImage"/>
+<div class="turnOrderBox"><h4>Turn Order</h4><ul class="turnOrderList"></ul></div>
+</div>
+<!-- Waiting (now includes Community Doodle under Turn Order) -->
+<div class="container hidden" id="waitScreen">
+<div id="turnBanner"></div>
+<div class="turnOrderBox"><h4>Turn Order</h4><ul class="turnOrderList"></ul></div>
+<div class="hidden no-select" id="communityDoodleSection">
+<div aria-label="Community Doodle" id="cdTitle"></div>
+<div id="cdDesc">Optional: Everyone who is waiting can draw together here. Your assigned color is below.</div>
+<div id="cdColorRow">Your color: <span id="cdSwatch"></span><span id="cdColorText"></span></div>
+<canvas height="560" id="communityCanvas" width="720"></canvas></div>
+</div>
+<!-- Results -->
+<div class="container hidden" id="resultsScreen">
+<h2 style="font-size:1.6em;color:var(--accent);">Results Summary</h2>
+<div class="finalWordRow" style="font-weight:700; font-size:1.25em"><span id="finalWordPill"><span class="pillLabel">Original Word/Phrase:</span> <span id="finalWord"></span></span></div>
+<div id="resultsList" style="margin-top:12px;"></div>
+<!-- Community Doodle result (non-editable) -->
+<div class="hidden" id="communityResultsBox">
+<div class="resultStepHeader"><span class="cd-letter">C</span><span class="cd-letter">o</span><span class="cd-letter">m</span><span class="cd-letter">m</span><span class="cd-letter">u</span><span class="cd-letter">n</span><span class="cd-letter">i</span><span class="cd-letter">t</span><span class="cd-letter">y</span> <span class="cd-letter">D</span><span class="cd-letter">o</span><span class="cd-letter">o</span><span class="cd-letter">d</span><span class="cd-letter">l</span><span class="cd-letter">e</span></div>
+<img alt="Final Community Doodle" class="resultDrawing" id="communityResultImage"/>
+<div class="resultDivider"></div>
+</div>
+<div id="restartBox">
+<p><b>Ready for another round?</b><br/>
+      Restart with the same players and shuffle everyone (including the host).</p>
+<button onclick="restartGame()">🔁 Restart Game</button>
+</div>
+</div>
+<canvas class="hidden" id="confettiCanvas"></canvas>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<script>
+/* ----------------- Base game (from working build) ----------------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyD6LY0o8SfAqX08h3tuLheGJQ9YOm1IKE0",
+  authDomain: "telestrations-game-aa386.firebaseapp.com",
+  databaseURL: "https://telestrations-game-aa386-default-rtdb.firebaseio.com/",
+  projectId: "telestrations-game-aa386",
+  storageBucket: "telestrations-game-aa386.firebasestorage.app",
+  messagingSenderId: "461499249155",
+  appId: "1:461499249155:web:c785ab9cd1c7aab44f1436"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let username="", roomCode="", isHost=false, penSize=6;
+let drawInterval=null, guessInterval=null, turnTicker=null;
+let __lastCelebrationKey = null;
+let lastTurnKey = null;
+function makeTurnKey(room){
+  const idx = room?.currentIndex ?? 0;
+  const phase = room?.state ?? '';
+  const ts = room?.turnStart ?? 0;
+  return `${phase}#${idx}#${ts}`;
+}
+
+const phrases = [
+  "Penguin on vacation","Cactus karaoke","Wi-Fi ghost","Banana in a tuxedo","Invisible umbrella",
+  "Robot doing yoga","Haunted toaster","Moonwalking giraffe","Submarine in the desert","Laptop campfire",
+  "Time-traveling pizza","Squirrel traffic cop","Octopus knitting sweater","Backwards bicycle","Sneezing volcano",
+  "Skateboarding elephant","Cat running a lemonade stand","Shark in a hot-air balloon","Mailbox with sunglasses","Fish walking a dog",
+  "Flying carpet commute","Cow on a trampoline","Dragon roasting marshmallows","Dinosaur at the dentist","Balloons lifting a houseplant",
+  "Astronaut watering plants","Camel on ice skates","Turtle with rocket boots","Unicorn stuck in traffic","Hamster paparazzi",
+  "Parachuting piano","Waffle snowstorm","Hot dog reading a newspaper","Marshmallow boxing match","Bowling with coconuts",
+  "Bumblebee barista","Snail delivering pizza","Kangaroo grocery shopping","Helicopter made of feathers","Toothbrush orchestra",
+  "T-Rex using chopsticks","Pirate penguin","Octopus high-five line","Jellyfish lamp","Popcorn thunderstorm","Rollercoaster in a library",
+  "Vampire sunscreen commercial","Mermaid on a bicycle","Yeti doing laundry","Sloth DJ","Gnome lifeguard","Cloud in a jar",
+  "Couch potato literally","Dancing traffic cones","Robot babysitter","Witch on a scooter","Wizard in a hoodie","Sasquatch selfie",
+  "Alien at the DMV","Zebra barcode","Pigeon mail service","Cupcake construction site","Knight walking a goldfish",
+  "Koala astronaut","Llama hair salon","Narwhal birthday party","Cheese moon landing","Ice cream in a sauna",
+  "Ghost stuck in revolving door","Spider web hammock","Mismatched socks parade","Accordion snake","Broomstick car wash",
+  "Bubble wrap runway","Cereal bowl swimming pool","Tornado in a teacup","Fire-breathing squirrel","Gorilla tea party",
+  "Compass that only points up","Map that’s scribbles","Invisible dog leash","Mailbox eating letters","Mirror with stage fright",
+  "Popsicle sunset","Penguin lifeguard","Cactus snowman","Skunk perfume tester","Toaster spaceship","Cloud mowing the lawn",
+  "Dolphin on a pogo stick","Watering can rainstorm","Pizza delivery by drone dragon","Kite surfing in a bathtub","Suitcase with feelings",
+  "Coffee mug telescope","Microwave time machine","Sneakers made of clouds","Bicycle with square wheels","Trombone tornado",
+  "Robot choir","Sandcastle skyscraper","Glasses on a statue blinking","Train made of spaghetti","Raincoat for a cat",
+  "Bubblegum galaxy","Hedgehog barbershop","Avocado karate","Haunted sock","Candle doing taxes",
+  "Pumpkin scuba diver","Mailbox karaoke","Ladder to the moon","Coconut laptop","Cranes lifting a rainbow",
+  "Thunderstorm with confetti","Paper airplane airline","Donut eclipse","Cucumber cowboy","Piano under the sea",
+  "Taco telescope","Penguin orchestra","Squirrel yoga class","Skateboard made of books","Basketball on the moon",
+  "Koala hot air balloon","Ice cube in the desert","Raccoon pizza chef","Origami dragonfly","Marshmallow camp counselor",
+  "Potato astronaut","Dragon reading bedtime stories","Rubber duck safari","Waffle iron orchestra","Penguin snowplow",
+  "Caterpillar limousine","Spaghetti jump rope","Snowman with a sunburn","Tooth fairy stuck in traffic","Cup of tea surfing",
+  "Elevator to nowhere","Moon cheese factory","Robot gardening in space","Umbrella playing poker","Pillow fight tournament"
+];
+
+const byId = id => document.getElementById(id);
+function showOnly(id){
+  ["homeScreen","lobbyScreen","wordSelectScreen","drawingScreen","guessScreen","waitScreen","resultsScreen"]
+    .forEach(el=>byId(el).classList.add("hidden"));
+  byId(id).classList.remove("hidden");
+}
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+function setBanner(code){ byId('bannerCode').textContent = code; byId('roomBanner').style.display='block'; }
+function resetToHome(){ location.reload(); }
+
+function setupPresence(){
+  if(!roomCode || !username) return;
+  const connRef = db.ref(`rooms/${roomCode}/connections/${username}`);
+  connRef.set(true);
+  connRef.onDisconnect().remove();
+}
+
+/* ---------- Create / Join ---------- */
+function createRoom(){
+  username = byId('usernameInput').value.trim();
+  if(!username) return alert("Enter a username first");
+  isHost = true;
+  roomCode = Math.random().toString(36).substring(2,6).toUpperCase();
+  setBanner(roomCode);
+  const now = Date.now();
+  const roomsRef = db.ref('rooms');
+  roomsRef.once('value').then(snapshot=>{
+    snapshot.forEach(roomSnap=>{
+      const room = roomSnap.val();
+      if (room && room.createdAt && (now - room.createdAt > 24*60*60*1000)) {
+        roomSnap.ref.remove();
+      }
+    });
+  }).then(()=>{
+    return db.ref('rooms/'+roomCode).set({
+      host: username, players: [username], state:'lobby',
+      createdAt: now,
+      order: null, currentIndex: 0, gameData:{}, word:null, turnStart:null,
+      connections: {},
+      colorMap: {},               // user -> color (persist across rounds)
+      community: { round: 0 }     // meta for Community Doodle
+    });
+  }).then(()=>{
+    setupPresence();
+    subscribeRoom();
+    showLobby();
+  });
+}
+
+function joinRoomPrompt(){
+  username = byId('usernameInput').value.trim();
+  if(!username) return alert("Enter a username first");
+  const code = prompt("Enter Room Code (not case-sensitive):");
+  if(!code) return;
+  roomCode = code.toUpperCase();
+  setBanner(roomCode);
+
+  const roomRef = db.ref('rooms/'+roomCode);
+  roomRef.once('value').then(s=>{
+    if(!s.exists()){ alert("Room not found"); return; }
+    const r = s.val();
+    const now = Date.now();
+    if (r.createdAt && (now - r.createdAt > 24*60*60*1000)) {
+      alert("This room has expired and will be deleted. Please create a new one.");
+      roomRef.remove();
+      return;
+    }
+    const players = r.players || [];
+    if(!players.includes(username)) players.push(username);
+    return roomRef.child('players').set(players).then(() => {
+      isHost = false;
+      setupPresence();
+      subscribeRoom();
+      showLobby();
+    });
+  });
+}
+
+/* ---------- Lobby ---------- */
+function showLobby(){
+  showOnly('lobbyScreen');
+  byId('roomCodeDisplay').innerText = roomCode;
+  const listEl = byId('playerList');
+
+  db.ref(`rooms/${roomCode}/players`).on('value', snap=>{
+    const list = snap.val() || [];
+    db.ref(`rooms/${roomCode}/connections`).once('value').then(csnap=>{
+      const connMap = csnap.val()||{};
+      const connected = Object.keys(connMap);
+      listEl.innerHTML = list.map(p=>{
+        const isConnected = connected.includes(p);
+        return `<li class="${isConnected?'' : 'disconnected'}">${p}${isConnected?'' : ' (Disconnected)'}</li>`;
+      }).join("");
+      const canStart = isHost && list.length >= 2 && list.length <= 15;
+      byId('startGameBtn').classList.toggle('hidden', !canStart);
+      byId('lobbyMsg').innerText = isHost
+        ? "A minimum of 2 players are needed to start, and you can have up to 15 total."
+        : "Waiting for the host to start the game once everyone has joined and is ready.";
+    });
+  });
+}
+
+function startGame(){
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const players = room.players || [];
+    const host = players[0];
+    const others = shuffle(players.slice(1));
+    const order = [host, ...others];
+    const updates = {};
+    updates['rooms/'+roomCode+'/order'] = order;
+    updates['rooms/'+roomCode+'/currentIndex'] = 0;
+    updates['rooms/'+roomCode+'/state'] = 'wordSelect';
+    updates['rooms/'+roomCode+'/turnStart'] = null;
+    // initialize Community Doodle for this round
+    updates['rooms/'+roomCode+'/community/round'] = (room.community?.round || 0) + 1;
+    updates['rooms/'+roomCode+'/community/strokes'] = null;
+    updates['rooms/'+roomCode+'/community/finalImage'] = null;
+    return db.ref().update(updates);
+  });
+}
+
+function suggestWord(){
+  const random = phrases[Math.floor(Math.random() * phrases.length)];
+  byId('customWord').value = random;
+}
+
+function confirmWord(){
+  const cv = (byId('customWord')?.value || '').trim();
+  if(!cv){ alert("Please enter a word or phrase before starting."); return; }
+  const w = cv;
+  db.ref('rooms/'+roomCode).update({ word: w, state: 'drawing', currentIndex: 0, turnStart: firebase.database.ServerValue.TIMESTAMP });
+}
+
+/* ---------- Room subscription / routing ---------- */
+let roomListenerAttached = false;
+function subscribeRoom(){
+  if(roomListenerAttached) return;
+  roomListenerAttached = true;
+
+  db.ref('rooms/'+roomCode).on('value', snapshot=>{
+    const room = snapshot.val();
+    if(!room){ alert("Room closed"); location.reload(); return; }
+
+    renderTurnOrder(room);
+    startSharedTurnTicker(room);
+
+    if(room.state === 'lobby'){ showLobby(); return; }
+
+    if(room.state === 'wordSelect'){
+      // New round setup: clear local buffers so nothing carries over
+      strokes = [];
+      if (typeof clearCanvas === 'function') clearCanvas();
+      lastTurnKey = null;
+      hideCommunity(); // only show during active phases
+
+      const firstPlayer = room.order && room.order.length ? room.order[0] : room.host;
+      if(username === firstPlayer){
+        showOnly('wordSelectScreen');
+      } else {
+        showOnly('waitScreen');
+        setTurnBanner("⏳ Waiting for the host to pick a word or phrase. The game will start once the host confirms.");
+      }
+      ensureColorAssignment(room); // pre-assign colors (persist across rounds)
+      return;
+    }
+
+    const order = room.order || [];
+    const idx = room.currentIndex || 0;
+    const current = order[idx] || "";
+    const myTurn = (current === username);
+
+    if(room.state === 'drawing'){
+      if(myTurn) {
+        showOnly('drawingScreen');
+        startDrawingPhase(room, idx);
+        setTurnBanner("");
+        hideCommunity();
+      } else {
+        showOnly('waitScreen');
+        setPhaseBanner('drawing', current);
+        ensureColorAssignment(room);
+        showCommunity(room);
+      }
+      return;
+    }
+
+    if(room.state === 'guessing'){
+      if(myTurn) {
+        showOnly('guessScreen');
+        startGuessingPhase(room, idx);
+        setTurnBanner("");
+        hideCommunity();
+      } else {
+        showOnly('waitScreen');
+        setPhaseBanner('guessing', current);
+        ensureColorAssignment(room);
+        showCommunity(room);
+      }
+      return;
+    }
+
+    if(room.state === 'results'){
+      stopSharedTurnTicker();
+      setTurnBanner("");
+      hideCommunity();
+      showResults(room);
+      // ensure the community final is captured exactly once
+      trySaveCommunityFinal(room);
+      return;
+    }
+  });
+}
+
+/* ---------- Shared turn timer (unchanged) ---------- */
+function startSharedTurnTicker(room){
+  stopSharedTurnTicker();
+  updateTurnTimerLabels(room);
+  turnTicker = setInterval(()=>updateTurnTimerLabels(room), 1000);
+}
+function stopSharedTurnTicker(){ if(turnTicker){ clearInterval(turnTicker); turnTicker=null; } }
+function getPhaseDuration(state){ return state==='drawing' ? 80 : state==='guessing' ? 40 : 0; }
+function computeRemaining(room){
+  const ts = room.turnStart || 0;
+  const dur = getPhaseDuration(room.state);
+  if(!ts || !dur) return null;
+  const elapsed = Math.floor((getServerNow() - ts)/1000);
+  return Math.max(0, dur - elapsed);
+}
+function updateTurnTimerLabels(room){
+  const lists = document.querySelectorAll('.turnOrderList');
+  const order = room.order || [];
+  const idx = room.currentIndex || 0;
+  const remaining = computeRemaining(room);
+  const connected = room.connections ? Object.keys(room.connections) : [];
+  lists.forEach(list=>{
+    list.innerHTML = '';
+    order.forEach((name,i)=>{
+      const li = document.createElement('li');
+      const isConnected = connected.includes(name);
+      li.textContent = (i===idx && remaining!=null) ? `${name} (${remaining}s)` : name;
+      if(!isConnected){ li.classList.add('disconnected'); li.textContent += ' (Disconnected)'; }
+      if(i===idx) li.classList.add('current');
+      list.appendChild(li);
+    });
+  });
+}
+function renderTurnOrder(room){
+  const boxes = document.querySelectorAll('.turnOrderBox');
+  const show = (room.order || []).length > 0 && room.state !== 'lobby';
+  boxes.forEach(b => b.style.display = show ? 'block' : 'none');
+}
+
+function setPhaseBanner(phase, player){
+  const el = byId('turnBanner');
+  const icon = phase === 'drawing' ? '🖌️' : '💭';
+  el.textContent = `${icon} Now ${phase === 'drawing' ? 'Drawing' : 'Guessing'}: ${player}`;
+  el.style.display = 'inline-block';
+}
+function setTurnBanner(text){
+  const el = byId('turnBanner');
+  if(!text){ el.style.display = 'none'; el.textContent = ""; return; }
+  el.textContent = text; el.style.display = 'inline-block';
+}
+
+/* ---------- Player Drawing Canvas (unchanged) ---------- */
+const canvas = byId('drawCanvas');
+const ctx = canvas.getContext('2d');
+function resetCanvasBackground(){ ctx.fillStyle = "#fff"; ctx.fillRect(0,0,canvas.width,canvas.height); }
+resetCanvasBackground();
+
+let drawing=false;
+let strokes=[];
+let currentStroke=null;
+
+function highlightPen(btnId){
+  ['smallPen','mediumPen','largePen'].forEach(id=>byId(id).classList.remove('activePen'));
+  byId(btnId).classList.add('activePen');
+}
+function setPenSize(size){ penSize=size; highlightPen(size===2?'smallPen':size===6?'mediumPen':'largePen'); }
+setPenSize(6);
+
+function getCanvasPos(e, target){
+  const r = target.getBoundingClientRect();
+  const scaleX = target.width  / r.width;
+  const scaleY = target.height / r.height;
+  let clientX, clientY;
+  if (e.touches && e.touches.length){
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  } else {
+    clientX = (e.clientX !== undefined) ? e.clientX : (e.x || 0);
+    clientY = (e.clientY !== undefined) ? e.clientY : (e.y || 0);
+  }
+  const x = (clientX - r.left) * scaleX;
+  const y = (clientY - r.top)  * scaleY;
+  return { x, y };
+}
+
+function beginStroke(e){
+  drawing = true;
+  currentStroke = { size: penSize, points: [] };
+  addPoint(e);
+}
+function moveStroke(e){
+  if(!drawing) return;
+  addPoint(e);
+}
+function endStroke(){
+  if(!drawing) return;
+  drawing = false;
+  if(currentStroke && currentStroke.points.length){
+    strokes.push(currentStroke);
+  }
+  currentStroke = null;
+  ctx.beginPath();
+}
+
+function addPoint(e){
+  const p = getCanvasPos(e, canvas);
+  currentStroke.points.push(p);
+  ctx.lineWidth = currentStroke.size;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "black";
+  const pts = currentStroke.points;
+  if(pts.length === 1){
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+  }else{
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  }
+}
+
+canvas.addEventListener('mousedown', beginStroke);
+canvas.addEventListener('mousemove', moveStroke);
+canvas.addEventListener('mouseup', endStroke);
+canvas.addEventListener('mouseleave', endStroke);
+canvas.addEventListener('touchstart', e=>{ e.preventDefault(); beginStroke(e); }, {passive:false});
+canvas.addEventListener('touchmove',  e=>{ e.preventDefault(); moveStroke(e);  }, {passive:false});
+canvas.addEventListener('touchend',   e=>{ e.preventDefault(); endStroke();     }, {passive:false});
+
+function undo(){ strokes.pop(); redrawAll(); }
+function clearCanvas(){ strokes = []; ctx.clearRect(0,0,canvas.width,canvas.height); resetCanvasBackground(); }
+function redrawAll(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  resetCanvasBackground();
+  for(const s of strokes){
+    const pts = s.points;
+    if(!pts.length) continue;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i=1;i<pts.length;i++){ ctx.lineTo(pts[i].x, pts[i].y); }
+    ctx.lineWidth = s.size; ctx.strokeStyle = "black"; ctx.lineCap = "round"; ctx.stroke();
+  }
+}
+
+/* ---------- Timers / phases ---------- */
+function startDrawingPhase(room, idx){
+  const turnKey = makeTurnKey(room);
+  const isNewTurn = (turnKey !== lastTurnKey);
+
+  if (isNewTurn) {
+    strokes = [];
+    clearCanvas();
+    setPenSize(6);
+    lastTurnKey = turnKey;
+  }
+  byId('drawPrompt').innerText = (idx===0)
+    ? `Draw the word/phrase: "${room.word}"`
+    : `Draw this phrase: "${room.gameData[idx-1].data}"`;
+
+  startDrawTimer(room);
+}
+
+function startGuessingPhase(room, idx){
+  const turnKey = makeTurnKey(room);
+  const isNewTurn = (turnKey !== lastTurnKey);
+
+  const prev = room.gameData[idx-1];
+  byId('guessImage').src = prev?.data || '';
+
+  if (isNewTurn) {
+    byId('guessInput').value = '';
+    lastTurnKey = turnKey;
+  }
+
+  startGuessTimer(room);
+}
+
+/* Strict shared timers (wait for turnStart) */
+function startDrawTimer(room){
+  stopDrawTimer();
+  function startWhenReady(){
+    const ts = room.turnStart;
+    if (!ts) { setTimeout(startWhenReady, 50); return; }
+    const duration = 80;
+    const tick = () => {
+      const elapsed = Math.floor((getServerNow() - ts)/1000);
+      const remaining = Math.max(0, duration - elapsed);
+      byId('drawTimer').innerText = remaining + 's';
+      if (remaining <= 0) { submitDrawing(true); }
+    };
+    tick();
+    drawInterval = setInterval(tick, 1000);
+  }
+  startWhenReady();
+}
+function stopDrawTimer(){ if(drawInterval){ clearInterval(drawInterval); drawInterval=null; byId('drawTimer').innerText='80s'; } }
+
+function startGuessTimer(room){
+  stopGuessTimer();
+  function startWhenReady(){
+    const ts = room.turnStart;
+    if (!ts) { setTimeout(startWhenReady, 50); return; }
+    const duration = 40;
+    const tick = () => {
+      const elapsed = Math.floor((getServerNow() - ts)/1000);
+      const remaining = Math.max(0, duration - elapsed);
+      byId('guessTimer').innerText = remaining + 's';
+      if(remaining <= 0){
+        const typed = (byId('guessInput') && byId('guessInput').value) ? byId('guessInput').value.trim() : '';
+        const guessText = typed || 'No guess';
+        stopGuessTimer();
+        db.ref('rooms/'+roomCode).once('value').then(s=>{
+          const room = s.val();
+          const idx = room.currentIndex || 0;
+          const u = {};
+          u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:guessText, player:username };
+          const next = idx + 1;
+          if(next >= (room.order||[]).length){
+            u['rooms/'+roomCode+'/state'] = 'results';
+          } else {
+            u['rooms/'+roomCode+'/currentIndex'] = next;
+            u['rooms/'+roomCode+'/state'] = 'drawing';
+            u['rooms/'+roomCode+'/turnStart'] = Date.now();
+          }
+          db.ref().update(u);
+        });
+      }
+    };
+    tick();
+    guessInterval = setInterval(tick, 1000);
+  }
+  startWhenReady();
+}
+function stopGuessTimer(){ if(guessInterval){ clearInterval(guessInterval); guessInterval=null; byId('guessTimer').innerText='40s'; } }
+
+function submitDrawing(forced){
+  if(!forced && strokes.length===0){
+    alert("Please add at least one stroke before submitting.");
+    return;
+  }
+  stopDrawTimer();
+  const dataURL = canvas.toDataURL('image/png');
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      u['rooms/'+roomCode+'/state'] = 'guessing';
+      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+    }
+    db.ref().update(u);
+  });
+}
+
+function submitGuess(){
+  try {
+    var __el = byId('guessInput');
+    var __v = (__el && __el.value || '').trim();
+    if(!__v){ alert("Please type a guess (or wait for the timer to auto-submit)."); return false; }
+  } catch(e) {}
+  const val = (byId('guessInput').value || '').trim();
+  if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
+  stopGuessTimer();
+  const g = val;
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      u['rooms/'+roomCode+'/state'] = 'drawing';
+      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+    }
+    db.ref().update(u);
+  });
+}
+
+/* ---------- Results ---------- */
+function showResults(room){
+  showOnly('resultsScreen');
+  byId('finalWord').innerText = room.word || '';
+  const list = byId('resultsList');
+  list.innerHTML = '';
+  const steps = Object.keys(room.gameData||{}).map(n=>parseInt(n,10)).sort((a,b)=>a-b);
+
+  steps.forEach(step=>{
+    const e = room.gameData[step];
+    const block = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.classList.add('resultStepHeader');
+    header.innerText = `Step ${step+1} — ${e.player} (${e.type})`;
+    block.appendChild(header);
+
+    if(e.type === 'draw'){
+      const img = document.createElement('img');
+      img.src = e.data;
+      img.classList.add('resultDrawing');
+      block.appendChild(img);
+    } else {
+      const guessBox = document.createElement('div');
+      guessBox.classList.add('resultGuess');
+      guessBox.innerText = e.data;
+      block.appendChild(guessBox);
+    }
+
+    const divider = document.createElement('div');
+    divider.classList.add('resultDivider');
+    block.appendChild(divider);
+
+    list.appendChild(block);
+  });
+
+  // Show Community Doodle final, if available
+  const final = room.community && room.community.finalImage;
+  const box = byId('communityResultsBox');
+  if(final){
+    byId('communityResultImage').src = final;
+    box.classList.remove('hidden');
+  } else {
+    box.classList.add('hidden');
+  }
+
+  // Confetti (prevent duplicate)
+  (function(){ const key = (room.word||'') + '|' + Object.keys(room.gameData||{}).length; if(__lastCelebrationKey !== key){ startConfetti(2000); __lastCelebrationKey = key; } })();
+}
+
+function restartGame(){
+  if(!roomCode) return;
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    if(!room) return;
+    const players = (room.players || []).slice();
+    const newOrder = shuffle(players);
+    const u = {
+      ['rooms/'+roomCode+'/order']: newOrder,
+      ['rooms/'+roomCode+'/currentIndex']: 0,
+      ['rooms/'+roomCode+'/gameData']: {},
+      ['rooms/'+roomCode+'/word']: null,
+      ['rooms/'+roomCode+'/state']: 'wordSelect',
+      ['rooms/'+roomCode+'/turnStart']: null,
+      // Community Doodle reset for new round, keep colors
+      ['rooms/'+roomCode+'/community/round']: (room.community?.round || 0) + 1,
+      ['rooms/'+roomCode+'/community/strokes']: null,
+      ['rooms/'+roomCode+'/community/finalImage']: null
+    };
+    return db.ref().update(u);
+  });
+}
+
+/* ---------- Confetti ---------- */
+function startConfetti(durationMs){
+  const c = byId('confettiCanvas');
+  c.classList.remove('hidden');
+  const ctx = c.getContext('2d');
+
+  function resize(){ c.width = window.innerWidth; c.height = window.innerHeight; }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const colors = ["#ff595e","#ffca3a","#8ac926","#1982c4","#6a4c93","#ff9f1c","#2ec4b6"];
+  const particles = [];
+  const count = 200;
+  const centerX = c.width / 2;
+  const centerY = c.height / 2;
+
+  for(let i=0;i<count;i++){
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 4 + Math.random() * 6;
+    particles.push({
+      x: centerX, y: centerY,
+      vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 2,
+      size: 2 + Math.random() * 4,
+      color: colors[Math.floor(Math.random()*colors.length)],
+      life: 0, maxLife: 60 + Math.random()*40,
+      rotation: Math.random() * 360, vr: (Math.random() - 0.5) * 10
+    });
+  }
+
+  let animId = null;
+  const gravity = 0.15;
+  const drag = 0.995;
+  const startTime = performance.now();
+
+  function draw(){
+    const now = performance.now();
+    const elapsed = now - startTime;
+    ctx.clearRect(0,0,c.width,c.height);
+
+    particles.forEach(p=>{
+      p.life++;
+      p.vx *= drag;
+      p.vy = p.vy * drag + gravity;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rotation += p.vr;
+
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation * Math.PI/180);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+      ctx.restore();
+    });
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      if (particles[i].life > particles[i].maxLife) particles.splice(i,1);
+    }
+
+    if (elapsed < durationMs && particles.length) {
+      animId = requestAnimationFrame(draw);
+    } else {
+      cleanup();
+    }
+  }
+  function cleanup(){
+    if (animId) cancelAnimationFrame(animId);
+    ctx.clearRect(0,0,c.width,c.height);
+    c.classList.add('hidden');
+    window.removeEventListener('resize', resize);
+  }
+  draw();
+}
+
+/* ---- Timer Sync Fix ---- */
+let serverOffset = 0;
+firebase.database().ref(".info/serverTimeOffset").on("value", snap => {
+  serverOffset = snap.val() || 0;
+});
+function getServerNow() { return Date.now() + serverOffset; }
+
+
+/* ===================== Community Doodle ===================== */
+/*
+  Paths used:
+    rooms/{roomCode}/colorMap                -> { username: "#hex" }
+    rooms/{roomCode}/community/round         -> round number (increments each round)
+    rooms/{roomCode}/community/strokes/{id}  -> segment objects appended live
+    rooms/{roomCode}/community/finalImage    -> dataURL when results are reached
+*/
+
+const COMMUNITY_COLORS = [
+  "#ff4d4d","#ff7a00","#ffb400","#22c55e","#F5F5F5",
+  "#06b6d4","#64748B","#2563eb","#7c3aed","#db2777",
+  "#f97316","#d946ef","#84cc16","#14b8a6","#e11d48"
+];
+
+function ensureColorAssignment(room){
+  // Use a transaction so multiple joiners don't claim the same color
+  const cmapRef = db.ref(`rooms/${roomCode}/colorMap`);
+  cmapRef.transaction(curr => {
+    const map = curr || {};
+    if (map[username]) return map; // already assigned
+
+    // pick an unused color first; if all used (shouldn't happen with max 15), fall back to random
+    const used = new Set(Object.values(map || {}));
+    const available = COMMUNITY_COLORS.filter(c => !used.has(c));
+    let assigned = available.length
+      ? available[Math.floor(Math.random() * available.length)]
+      : COMMUNITY_COLORS[Math.floor(Math.random() * COMMUNITY_COLORS.length)];
+    map[username] = assigned;
+    return map;
+  }, (error, committed, snap) => {
+    // Regardless of outcome, reflect whatever color the map currently has for this user
+    if (error) {
+      // Fallback attempt: read current color (if any) to avoid UI being stuck
+      cmapRef.once('value').then(s => {
+        const m = s.val() || {};
+        const col = m[username];
+        if (col) setLocalColor(col);
+      });
+      return;
+    }
+    const m = (snap && snap.val()) || {};
+    const col = m[username];
+    if (col) setLocalColor(col);
+  });
+}
+
+let myCommunityColor = "#22c55e";
+function setLocalColor(c){
+  myCommunityColor = c;
+  const sw = byId('cdSwatch'); const tx = byId('cdColorText');
+  if(sw){ sw.style.background = c; } if(tx){ tx.textContent = c; }
+}
+
+let cdCanvas = null, cdCtx = null;
+let cdDrawing = false;
+let cdLastPoint = null;
+let cdListenerAttached = false;
+let cdStrokesRef = null;
+let cdCurrentRound = 0;
+
+function buildCdTitle(){
+  const text = "Community Doodle";
+  const el = byId('cdTitle');
+  el.innerHTML = "";
+  for(const ch of text){
+    const span = document.createElement('span');
+    span.textContent = ch;
+    span.className = (ch === " ") ? "" : "cd-letter";
+    el.appendChild(span);
+  }
+}
+
+function initCommunityCanvas(){
+  if(cdCanvas) return;
+  cdCanvas = byId('communityCanvas');
+  cdCtx = cdCanvas.getContext('2d');
+  drawChalkboardBackground();
+  // input handlers
+  cdCanvas.addEventListener('mousedown', e=>{ cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
+  cdCanvas.addEventListener('mousemove', e=>{ if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
+  cdCanvas.addEventListener('mouseup',   ()=>{ cdDrawing=false; cdLastPoint=null; });
+  cdCanvas.addEventListener('mouseleave',()=>{ cdDrawing=false; cdLastPoint=null; });
+  cdCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
+  cdCanvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
+  cdCanvas.addEventListener('touchend',   e=>{ e.preventDefault(); cdDrawing=false; cdLastPoint=null; }, {passive:false});
+}
+
+function drawChalkboardBackground(){
+  if(!cdCtx) return;
+  // fill black + subtle vignette
+  const w = cdCanvas.width, h = cdCanvas.height;
+  cdCtx.fillStyle = "#0f0f12";
+  cdCtx.fillRect(0,0,w,h);
+  // chalk smudges
+  for(let i=0;i<40;i++){
+    cdCtx.beginPath();
+    const x = Math.random()*w, y = Math.random()*h;
+    const r = 6 + Math.random()*22;
+    cdCtx.fillStyle = "rgba(255,255,255,0.02)";
+    cdCtx.arc(x,y,r,0,Math.PI*2);
+    cdCtx.fill();
+  }
+  // thin border
+  cdCtx.strokeStyle = "#2a2a2a";
+  cdCtx.lineWidth = 4;
+  cdCtx.strokeRect(2,2,w-4,h-4);
+}
+
+function clearCommunityCanvas(){
+  if(!cdCtx) return;
+  cdCtx.clearRect(0,0,cdCanvas.width,cdCanvas.height);
+  drawChalkboardBackground();
+}
+
+function attachCommunityListeners(room){
+  if(cdListenerAttached && cdCurrentRound === (room.community?.round || 0)) return;
+
+  // Detach previous if any
+  if(cdStrokesRef){
+    cdStrokesRef.off();
+    cdStrokesRef = null;
+  }
+  cdListenerAttached = false;
+
+  const round = room.community?.round || 0;
+  cdCurrentRound = round;
+  cdStrokesRef = db.ref(`rooms/${roomCode}/community/strokes`);
+
+  // Reset local canvas to match DB (fresh round)
+  clearCommunityCanvas();
+
+  // Draw existing strokes once
+  cdStrokesRef.once('value').then(snap=>{
+    const data = snap.val();
+    if(data){
+      Object.keys(data).sort().forEach(k=>{
+        const seg = data[k];
+        if(seg && seg.round === cdCurrentRound){
+          drawSegment(seg);
+        }
+      });
+    }
+  });
+
+  // Live updates
+  cdStrokesRef.on('child_added', s=>{
+    const seg = s.val();
+    if(seg && seg.round === cdCurrentRound){
+      drawSegment(seg);
+    }
+  });
+
+  cdListenerAttached = true;
+}
+
+function drawSegment(seg){
+  if(!cdCtx) return;
+  cdCtx.beginPath();
+  cdCtx.moveTo(seg.x1, seg.y1);
+  cdCtx.lineTo(seg.x2, seg.y2);
+  cdCtx.lineWidth = seg.size || 3;
+  cdCtx.lineCap = "round";
+  cdCtx.strokeStyle = seg.color || "#fff";
+  cdCtx.stroke();
+}
+
+function pushCdSegment(p1, p2){
+  if(!roomCode) return;
+  // Clamp + ignore tiny jitters
+  if(!p1 || !p2) return;
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const dist2 = dx*dx + dy*dy;
+  if(dist2 < 1.5) return;
+
+  const seg = {
+    x1: Math.max(0, Math.min(cdCanvas.width,  p1.x)),
+    y1: Math.max(0, Math.min(cdCanvas.height, p1.y)),
+    x2: Math.max(0, Math.min(cdCanvas.width,  p2.x)),
+    y2: Math.max(0, Math.min(cdCanvas.height, p2.y)),
+    color: myCommunityColor,
+    size: 3,
+    user: username,
+    t: Date.now(),
+    round: cdCurrentRound
+  };
+  db.ref(`rooms/${roomCode}/community/strokes`).push(seg);
+}
+
+/* Show / hide section, and wire it up under Turn Order in wait screen */
+function showCommunity(room){
+  const sec = byId('communityDoodleSection');
+  if(!sec) return;
+  buildCdTitle();
+  sec.classList.remove('hidden');
+  initCommunityCanvas();
+  attachCommunityListeners(room);
+  // color UI
+  setLocalColor((room.colorMap||{})[username] || myCommunityColor);
+}
+function hideCommunity(){
+  const sec = byId('communityDoodleSection');
+  if(sec) sec.classList.add('hidden');
+}
+
+/* Capture final Community Doodle image when entering results (once) */
+let savingCommunityFinal = false;
+function trySaveCommunityFinal(room){
+  if(savingCommunityFinal) return;
+  if(!room || !room.community || room.community.finalImage) return;
+  savingCommunityFinal = true;
+
+  // Repaint from DB to an offscreen canvas to ensure consistency
+  const off = document.createElement('canvas');
+  off.width = 720; off.height = 560;
+  const octx = off.getContext('2d');
+
+  // chalkboard bg
+  octx.fillStyle = "#0f0f12"; octx.fillRect(0,0,off.width,off.height);
+  octx.strokeStyle = "#2a2a2a"; octx.lineWidth = 4; octx.strokeRect(2,2,off.width-4,off.height-4);
+
+  db.ref(`rooms/${roomCode}/community/strokes`).once('value').then(snap=>{
+    const data = snap.val();
+    const entries = data ? Object.values(data).filter(x=>x && x.round === (room.community.round||0)) : [];
+    entries.sort((a,b)=> (a.t||0) - (b.t||0));
+    entries.forEach(seg=>{
+      octx.beginPath();
+      octx.moveTo(seg.x1, seg.y1);
+      octx.lineTo(seg.x2, seg.y2);
+      octx.lineWidth = seg.size || 3;
+      octx.lineCap = "round";
+      octx.strokeStyle = seg.color || "#fff";
+      octx.stroke();
+    });
+    const dataURL = off.toDataURL('image/png');
+    // Only set if still empty
+    db.ref(`rooms/${roomCode}/community/finalImage`).transaction(curr => curr || dataURL);
+  }).finally(()=>{ savingCommunityFinal = false; });
+}
+
+</script>
+</body>
+</html>
