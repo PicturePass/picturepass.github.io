@@ -5,7 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <meta content="upgrade-insecure-requests" http-equiv="Content-Security-Policy"/>
-<title>🎨 Telestrations Game 🎨</title>
+<title>🎨 PicturePass 🎨</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&amp;display=swap" rel="stylesheet"/>
 <style>
   :root {
@@ -21,7 +21,7 @@
   }
   * { box-sizing: border-box; }
   body { font-family: "Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background-color: var(--bg); color: var(--text); text-align: center; margin: 0; padding: 0; }
-  h1 { color: var(--accent); margin: 22px 0 10px; cursor: pointer; font-weight: 600; }
+  h1 { color: var(--accent); margin: 22px 0 10px; cursor: pointer; font-weight: 600; font-size: 40px; }
   .container { max-width: 980px; margin: 14px auto; background: var(--panel); padding: 22px; border-radius: 14px; border: 2px solid var(--border); box-shadow: 0 4px 10px rgba(0,0,0,0.08); position: relative; }
   button { background-color: var(--primary); color: #fff; border: none; padding: 10px 16px; border-radius: 10px; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease, background-color .2s ease; font-weight: 600; }
   button:hover { background-color: var(--primary-dark); transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.12); }
@@ -121,9 +121,9 @@
     --green-oval-border: #22c55e;  /* medium green border */
     --green-text-dark: #14532d;    /* dark readable green */
   }
-  .emojiFlow {
+  .emojiFlow { font-size: 0.9em;
     display: inline-block;
-    padding: 6px 16px;
+    padding: 4px 12px;
     border-radius: 9999px;
     background: var(--green-oval-bg);
     border: 2px solid var(--green-oval-border);
@@ -185,10 +185,14 @@
     font-weight: 700;
   }
 
+
+Zpx; }
+}
+
 </style>
 </head>
 <body>
-<h1 onclick="resetToHome()">🎨 Telestrations Game 🎨</h1><div class="emojiFlow">🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭</div>
+<h1 onclick="resetToHome()">🎨 PicturePass 🎨</h1><div class="emojiFlow">🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭</div>
 <div id="roomBanner">Room Code: <span id="bannerCode"></span></div>
 <!-- Home -->
 <div class="container" id="homeScreen">
