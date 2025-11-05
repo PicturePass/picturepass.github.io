@@ -524,10 +524,31 @@ function suggestWord(){
   byId('customWord').value = random;
 }
 
+
 function confirmWord(){
   const cv = (byId('customWord')?.value || '').trim();
   if(!cv){ alert("Please enter a word or phrase before starting."); return; }
   const w = cv;
+  // Read room to know first player and create a 3s transition for everyone
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val() || {};
+    const first = (room.order && room.order.length) ? room.order[0] : room.host;
+    const updates = {};
+    updates['rooms/'+roomCode+'/word'] = w;
+    updates['rooms/'+roomCode+'/transition'] = {
+      active: true,
+      nextPlayer: first,
+      nextPhase: 'drawing',
+      start: firebase.database.ServerValue.TIMESTAMP,
+      ms: 3000
+    };
+    updates['rooms/'+roomCode+'/state'] = 'transition';
+    updates['rooms/'+roomCode+'/currentIndex'] = 0;
+    updates['rooms/'+roomCode+'/turnStart'] = null; // actual start set after transition
+    return db.ref().update(updates);
+  });
+}
+const w = cv;
   db.ref('rooms/'+roomCode).update({ word: w, state: 'drawing', currentIndex: 0, turnStart: firebase.database.ServerValue.TIMESTAMP });
 }
 
@@ -845,12 +866,40 @@ function startGuessTimer(room){
 }
 function stopGuessTimer(){ if(guessInterval){ clearInterval(guessInterval); guessInterval=null; byId('guessTimer').innerText='40s'; } }
 
+
 function submitDrawing(forced){
   if(!forced && strokes.length===0){
     alert("Please add at least one stroke before submitting.");
     return;
   }
   stopDrawTimer();
+  const dataURL = canvas.toDataURL('image/png');
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      const nextPlayer = (room.order||[])[next] || '';
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      // Set a 3s transition for ALL players before guessing starts
+      u['rooms/'+roomCode+'/transition'] = {
+        active: true,
+        nextPlayer: nextPlayer,
+        nextPhase: 'guessing',
+        start: firebase.database.ServerValue.TIMESTAMP,
+        ms: 3000
+      };
+      u['rooms/'+roomCode+'/state'] = 'transition';
+      u['rooms/'+roomCode+'/turnStart'] = null; // will set after transition
+    }
+    db.ref().update(u);
+  });
+}
+stopDrawTimer();
   const dataURL = canvas.toDataURL('image/png');
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
@@ -869,12 +918,43 @@ function submitDrawing(forced){
   });
 }
 
+
 function submitGuess(){
   try {
     var __el = byId('guessInput');
     var __v = (__el && __el.value || '').trim();
     if(!__v){ alert("Please type a guess (or wait for the timer to auto-submit)."); return false; }
   } catch(e) {}
+  const val = (byId('guessInput').value || '').trim();
+  if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
+  stopGuessTimer();
+  const g = val;
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      const nextPlayer = (room.order||[])[next] || '';
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      // Set a 3s transition for ALL players before drawing starts
+      u['rooms/'+roomCode+'/transition'] = {
+        active: true,
+        nextPlayer: nextPlayer,
+        nextPhase: 'drawing',
+        start: firebase.database.ServerValue.TIMESTAMP,
+        ms: 3000
+      };
+      u['rooms/'+roomCode+'/state'] = 'transition';
+      u['rooms/'+roomCode+'/turnStart'] = null; // will set after transition
+    }
+    db.ref().update(u);
+  });
+}
+} catch(e) {}
   const val = (byId('guessInput').value || '').trim();
   if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
   stopGuessTimer();
@@ -1318,52 +1398,34 @@ function trySaveCommunityFinal(room){
 
 
 
-<!-- ===== Synced Turn Transition (3s for everyone between turns) ===== -->
+<!-- ===== Global Turn Transition (synchronized 3s pause for everyone) ===== -->
 <style>
-  #turnTransition {
-    display: none; position: fixed; inset: 0; z-index: 10000;
-    background: rgba(0,0,0,0.65);
-    align-items: center; justify-content: center;
-  }
-  #turnTransition .tt-card {
-    background: #fff; border: 2px solid #cbd5e0; border-radius: 16px;
-    padding: 22px 28px; max-width: 90vw; text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,.18);
-  }
-  #turnTransition .tt-title { font-size: 14px; color: #475569; margin-bottom: 4px; letter-spacing:.4px; }
-  #turnTransition .tt-name { font-size: 24px; font-weight: 800; color: #0b66b2; margin: 4px 0 8px; }
-  #turnTransition .tt-phase { display:inline-block; padding: 6px 14px; border-radius: 9999px;
-    border:2px solid #22c55e; background:#BBF7D0; color:#14532d; font-weight:700; margin-bottom:10px; }
-  #turnTransition .tt-sub { font-size: 13px; color:#1f2937; opacity:.8; }
+  #turnTransition { display:none; position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.65); align-items:center; justify-content:center; }
+  #turnTransition .tt-card { background:#fff; border:2px solid #cbd5e0; border-radius:16px; padding:22px 28px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,.18); max-width:90vw; }
+  #turnTransition .tt-title { font-size:14px; color:#475569; margin-bottom:4px; letter-spacing:.4px; }
+  #turnTransition .tt-name  { font-size:24px; font-weight:800; color:#0b66b2; margin:4px 0 8px; }
+  #turnTransition .tt-phase { display:inline-block; padding:6px 14px; border-radius:9999px; border:2px solid #22c55e; background:#BBF7D0; color:#14532d; font-weight:700; margin-bottom:10px; }
+  #turnTransition .tt-sub   { font-size:13px; color:#1f2937; opacity:.85; }
 </style>
-
 <div id="turnTransition">
   <div class="tt-card">
     <div class="tt-title">Next up</div>
     <div id="ttPlayer" class="tt-name">Player</div>
-    <div id="ttPhase" class="tt-phase">Drawing</div>
+    <div id="ttPhase"  class="tt-phase">Drawing</div>
     <div class="tt-sub">Pausing for 3 seconds between turns…</div>
   </div>
 </div>
-
 <script>
 (function(){
-  // Requirements this script assumes exist in your file:
-  //   - firebase + db = firebase.database()
-  //   - window.username, window.roomCode
-  //   - room schema: {host, players, order, currentIndex, state, turnStart}
-  // This is a "sidecar" that gates every new 'drawing'/'guessing' turn behind a 3s 'transition' state for ALL players.
-  // It is minimally invasive and doesn't change your normal UI router; it only injects a 'transition' state.
+  var overlay     = document.getElementById('turnTransition');
+  var nameEl      = document.getElementById('ttPlayer');
+  var phaseEl     = document.getElementById('ttPhase');
+  var roomListenerAttached = false;
 
-  var overlay = document.getElementById('turnTransition');
-  var ttName  = document.getElementById('ttPlayer');
-  var ttPhase = document.getElementById('ttPhase');
-
-  function showOverlay(name, phase){
+  function showOverlay(player, phase){
     try{
-      if (ttName)  ttName.textContent  = name || '';
-      if (ttPhase) ttPhase.textContent = (phase==='drawing' ? 'Drawing' : 'Guessing');
-      // Hide Community Doodle / inputs while overlay is up (if helpers exist)
+      if(nameEl)  nameEl.textContent  = player || '';
+      if(phaseEl) phaseEl.textContent = (phase === 'drawing' ? 'Drawing' : 'Guessing');
       try { if (typeof hideCommunity === 'function') hideCommunity(); } catch(e){}
       overlay.style.display = 'flex';
     }catch(e){ console.error(e); }
@@ -1371,124 +1433,53 @@ function trySaveCommunityFinal(room){
   function hideOverlay(){
     try{
       overlay.style.display = 'none';
-      // Router will reveal appropriate UI afterwards (drawing/guessing/wait)
       try { if (typeof maybeShowCommunity === 'function') maybeShowCommunity(); } catch(e){}
     }catch(e){}
   }
 
-  function serverNowFallback(room){ // approximate; transition uses server timestamps so values are numeric when received
+  function nowFromOffset(room){
+    // If you maintain a serverOffset elsewhere, you could use that here.
     return Date.now();
   }
 
-  function computeKey(room){
-    var idx = room && room.currentIndex || 0;
-    var st  = room && room.state || '';
-    var ts  = room && room.turnStart || 0;
-    return st + '|' + idx + '|' + ts;
-  }
-
-  var overlayListenerAttached = false;
-  var lastKeySeen = null;
-
   function handleRoom(room){
     if(!room) return;
-
-    var isHost = (room.host === window.username);
-    var idx    = room.currentIndex || 0;
-    var order  = room.order || [];
-    var currP  = order[idx] || room.host || '';
-    var st     = room.state || '';
-    var key    = computeKey(room);
-
-    // 1) If we're in 'transition', show overlay for ALL players, then host flips to intended phase after 3s
-    if (st === 'transition'){
+    if(room.state === 'transition'){
       var tr = room.transition || {};
-      var nextP   = tr.nextPlayer || currP;
-      var nextPh  = tr.nextPhase  || 'drawing';
-      var start   = tr.start || 0;       // server-resolved number
-      var ms      = tr.ms || 3000;
-      showOverlay(nextP, nextPh);
+      showOverlay(tr.nextPlayer || '', tr.nextPhase || 'drawing');
 
-      var elapsed = 0;
-      if (typeof start === 'number') {
-        elapsed = serverNowFallback(room) - start;
-      }
+      // Host resumes phase after 3s
+      var isHost = (room.host === username);
+      var start  = (typeof tr.start === 'number') ? tr.start : 0;
+      var ms     = tr.ms || 3000;
+      var elapsed = nowFromOffset(room) - start;
 
-      if (elapsed >= ms && isHost){
-        // Host resumes intended state, starts the turn, and sets a brief noGate window to avoid loops.
-        var u = {};
-        u['rooms/'+roomCode+'/state'] = nextPh;
-        u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-        u['rooms/'+roomCode+'/transition'] = null;
-        u['rooms/'+roomCode+'/noGateUntil'] = firebase.database.ServerValue.TIMESTAMP; // will add 2s below via transaction
-
-        // First push the state change; then extend noGateUntil by +2000ms
-        db.ref().update(u).then(function(){
-          // Bump noGateUntil by +2000ms using current server time
-          db.ref('rooms/'+roomCode+'/noGateUntil').transaction(function(cur){
-            // cur is server timestamp from above; we add 2000 to it.
-            if (typeof cur === 'number') return cur + 2000;
-            return cur;
-          });
-        }).catch(console.error);
-      }
-      if (elapsed < ms){
-        // Keep showing overlay
-      } else {
-        // The host changed state; hide overlay locally once router switches
-        setTimeout(hideOverlay, 50);
+      if(isHost && elapsed >= ms){
+        var updates = {};
+        updates['rooms/'+roomCode+'/state'] = tr.nextPhase || 'drawing';
+        updates['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
+        updates['rooms/'+roomCode+'/transition'] = null;
+        db.ref().update(updates).catch(console.error);
       }
       return;
     }
-
-    hideOverlay(); // ensure hidden outside transition
-
-    // 2) If a new 'drawing' or 'guessing' turn starts, gate it behind a transition (host only), unless within noGateUntil
-    if (st === 'drawing' || st === 'guessing'){
-      var noGateUntil = room.noGateUntil || 0;
-      var now = serverNowFallback(room);
-      var safeToGate = (now > noGateUntil);
-
-      if (safeToGate && isHost){
-        // Ensure we only gate once per observed key
-        if (lastKeySeen !== key){
-          lastKeySeen = key;
-
-          var tr = {
-            active: true,
-            nextPlayer: currP,
-            nextPhase: st,
-            start: firebase.database.ServerValue.TIMESTAMP,
-            ms: 3000
-          };
-
-          var u = {};
-          u['rooms/'+roomCode+'/transition'] = tr;
-          u['rooms/'+roomCode+'/state'] = 'transition';
-          // Clear turnStart so the real start happens AFTER the 3s gate
-          u['rooms/'+roomCode+'/turnStart'] = null;
-          // Also set noGateUntil to now so we won't instantly re-gate after returning
-          u['rooms/'+roomCode+'/noGateUntil'] = firebase.database.ServerValue.TIMESTAMP;
-
-          db.ref().update(u).catch(console.error);
-        }
-      }
-    }
+    // Not in transition
+    hideOverlay();
   }
 
-  // Attach dedicated listener (separate from your main router)
-  var attachTimer = setInterval(function(){
+  // Attach after roomCode is set
+  var attachInt = setInterval(function(){
     try{
-      if(!overlayListenerAttached && window.roomCode && window.firebase && window.db){
-        db.ref('rooms/'+roomCode).on('value', function(snap){ handleRoom(snap.val()); });
-        overlayListenerAttached = true;
-        clearInterval(attachTimer);
+      if(!roomListenerAttached && roomCode && db){
+        db.ref('rooms/'+roomCode).on('value', snap => handleRoom(snap.val()));
+        roomListenerAttached = true;
+        clearInterval(attachInt);
       }
-    }catch(e){ /* will try again */ }
-  }, 400);
+    }catch(e){}
+  }, 300);
 })();
 </script>
-<!-- ===== End Synced Turn Transition ===== -->
+<!-- ===== End Global Turn Transition ===== -->
 
 </body>
 </html>
