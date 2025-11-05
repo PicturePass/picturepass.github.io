@@ -355,6 +355,36 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+// === Atomic turn advancement helpers ===
+function txAdvanceTurn(expectedPhase, idxAtRead, tsAtStart, nextPhaseIfAny){
+  const rref = db.ref('rooms/'+roomCode);
+  return rref.transaction(function(cur){
+    if(!cur) return cur;
+    // Validate still same turn
+    if(cur.state !== expectedPhase) return cur;
+    if((cur.currentIndex||0) !== idxAtRead) return cur;
+    if((cur.turnStart||0) !== (tsAtStart||0)) return cur;
+    // Advance
+    const next = idxAtRead + 1;
+    if(next >= (cur.order||[]).length){
+      cur.state = 'results';
+      // turnStart set in follow-up update for server timestamp
+    } else {
+      cur.currentIndex = next;
+      cur.state = nextPhaseIfAny; // 'guessing' or 'drawing'
+      // turnStart set in follow-up update for server timestamp
+    }
+    return cur;
+  }).then(function(res){
+    // If committed, stamp server time for the new phase (or results)
+    // Use a single update to resolve ServerValue.TIMESTAMP on the server
+    const u = {};
+    u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
+    return db.ref().update(u);
+  });
+}
+
+
 let username="", roomCode="", isHost=false, penSize=6;
 let drawInterval=null, guessInterval=null, turnTicker=null;
 let __lastCelebrationKey = null;
@@ -818,25 +848,19 @@ function startGuessTimer(room){
       const remaining = Math.max(0, duration - elapsed);
       byId('guessTimer').innerText = remaining + 's';
       if(remaining <= 0){
-        const typed = (byId('guessInput') && byId('guessInput').value) ? byId('guessInput').value.trim() : '';
-        const guessText = typed || 'No guess';
-        stopGuessTimer();
-        db.ref('rooms/'+roomCode).once('value').then(s=>{
-          const room = s.val();
-          const idx = room.currentIndex || 0;
-          const u = {};
-          u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:guessText, player:username };
-          const next = idx + 1;
-          if(next >= (room.order||[]).length){
-            u['rooms/'+roomCode+'/state'] = 'results';
-          } else {
-            u['rooms/'+roomCode+'/currentIndex'] = next;
-            u['rooms/'+roomCode+'/state'] = 'drawing';
-            u['rooms/'+roomCode+'/turnStart'] = Date.now();
-          }
-          db.ref().update(u);
-        });
-      }
+  const typed = (byId('guessInput') && byId('guessInput').value) ? byId('guessInput').value.trim() : '';
+  const guessText = typed || 'No guess';
+  stopGuessTimer();
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const tsAtStart = room.turnStart || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:guessText, player:username };
+    return db.ref().update(u).then(()=> txAdvanceTurn('guessing', idx, tsAtStart, 'drawing'));
+  });
+}
+
     };
     tick();
     guessInterval = setInterval(tick, 1000);
@@ -855,19 +879,13 @@ function submitDrawing(forced){
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
     const idx = room.currentIndex || 0;
+    const tsAtStart = room.turnStart || 0;
     const u = {};
     u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'guessing';
-      u['rooms/'+roomCode+'/turnStart'] = Date.now();
-    }
-    db.ref().update(u);
+    return db.ref().update(u).then(()=> txAdvanceTurn('drawing', idx, tsAtStart, 'guessing'));
   });
 }
+
 
 function submitGuess(){
   try {
@@ -882,19 +900,13 @@ function submitGuess(){
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
     const idx = room.currentIndex || 0;
+    const tsAtStart = room.turnStart || 0;
     const u = {};
     u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'drawing';
-      u['rooms/'+roomCode+'/turnStart'] = Date.now();
-    }
-    db.ref().update(u);
+    return db.ref().update(u).then(()=> txAdvanceTurn('guessing', idx, tsAtStart, 'drawing'));
   });
 }
+
 
 /* ---------- Results ---------- */
 function showResults(room){
@@ -1316,138 +1328,6 @@ function trySaveCommunityFinal(room){
 })();
 </script>
 
-
-
-<!-- ===== Turn Token Guard (prevents turn skips during Community Doodle activity) ===== -->
-<script>
-(function(){
-  function makeToken(len){ len=len||20; var c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; var o=''; for(var i=0;i<len;i++) o+=c[Math.floor(Math.random()*c.length)]; return o; }
-  function db(){ try { return firebase.database(); } catch(e){ return null; } }
-  function roomRef(){ return db() ? db().ref('rooms/' + roomCode) : null; }
-  function isHost(room){ return room && (room.host === window.username); }
-  function currentPlayer(room){ var order=room.order||[]; var idx=room.currentIndex||0; return order[idx]||''; }
-  function phase(room){ return room && room.state; }
-  function shouldHaveToken(room){ return phase(room)==='drawing' || phase(room)==='guessing'; }
-
-  // Track the active token locally
-  window.activeTurnToken = window.activeTurnToken || '';
-
-  // Ensure a token exists when entering drawing/guessing; host sets it once
-  function ensureTurnToken(room){
-    try{
-      if(!shouldHaveToken(room)) return;
-      if(room.turnToken) return;
-      if(!isHost(room)) return;
-      var newTok = makeToken(24);
-      var u = {};
-      u['rooms/'+roomCode+'/turnToken'] = newTok;
-      // (Optionally re-stamp start to keep timers uniform)
-      if (!room.turnStart) u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-      db().ref().update(u);
-    }catch(e){}
-  }
-
-  // Subscribe to room to keep local token in sync
-  var _attached = false;
-  var waiter = setInterval(function(){
-    if(_attached || !window.roomCode || !db()) return;
-    try{
-      roomRef().on('value', function(snap){
-        var room = snap.val()||{};
-        if(shouldHaveToken(room)){
-          window.activeTurnToken = room.turnToken || '';
-        } else {
-          window.activeTurnToken = '';
-        }
-        ensureTurnToken(room);
-      });
-      _attached = True;
-      clearInterval(waiter);
-    }catch(e){}
-  }, 400);
-
-  // Transaction helper to advance turn safely
-  function advanceTurnTransaction(kind){
-    // kind is 'drawingSubmit', 'guessSubmit', or 'guessTimeout'
-    if(!db() || !window.roomCode) return Promise.reject(new Error('no db'));
-    return roomRef().transaction(function(room){
-      if(!room) return room;
-      var st = room.state;
-      var idx = room.currentIndex||0;
-      var me = window.username||'';
-      var curPlayer = currentPlayer(room);
-      var tokenOk = !!room.turnToken && (room.turnToken === window.activeTurnToken);
-
-      if(st !== 'drawing' && st !== 'guessing') return room; // ignore
-      if(curPlayer !== me && kind !== 'guessTimeout') return room; // only current player submits, timeout can be host
-      if(!tokenOk) return room; // stale/duplicate submit
-
-      // Write player's artifact (drawing/guess) into room (preserve existing fields)
-      try {
-        if(st === 'drawing'){
-          // Assuming drawing is already saved elsewhere in your code; we only advance here.
-        } else if(st === 'guessing'){
-          // Assuming guess is already saved elsewhere; we only advance here.
-        }
-      } catch(e){}
-
-      // Compute next step
-      var next = idx + 1;
-      if(next >= (room.order||[]).length){
-        // End-of-chain -> results
-        room.state = 'results';
-        room.turnStart = firebase.database.ServerValue.TIMESTAMP;
-        room.turnToken = null;
-      } else {
-        room.currentIndex = next;
-        room.state = (st === 'drawing') ? 'guessing' : 'drawing';
-        room.turnStart = null; // will be stamped when host sets token
-        room.turnToken = null; // force host to generate a fresh token for next player
-      }
-      return room;
-    }).then(function(){ return; });
-  }
-
-  // Override submitDrawing / submitGuess to use the guarded transaction
-  var _origSubmitDrawing = window.submitDrawing;
-  var _origSubmitGuess = window.submitGuess;
-
-  window.submitDrawing = function(forced){
-    // First, call original to save the drawing payload if needed (but not advance state)
-    try { if(typeof _origSubmitDrawing === 'function'){ _origSubmitDrawing(true); } } catch(e){}
-    // Then atomically advance
-    return advanceTurnTransaction('drawingSubmit').catch(console.error);
-  };
-
-  window.submitGuess = function(){
-    // First, call original to save the guess payload if needed (but not advance state)
-    try { if(typeof _origSubmitGuess === 'function'){ _origSubmitGuess.__saveOnly ? _origSubmitGuess.__saveOnly() : _origSubmitGuess(); } catch(e){}
-    // Then atomically advance
-    return advanceTurnTransaction('guessSubmit').catch(console.error);
-  };
-
-  // Patch guess timeout path: if your code calls a function like 'onGuessTimeout', replace it here.
-  // If not available, we add a minimal host-driven watchdog that advances when time is up.
-  function watchdog(){
-    try{
-      if(!db() || !roomCode) return;
-      roomRef().once('value').then(function(snap){
-        var room = snap.val()||{};
-        if(!isHost(room)) return;
-        if(phase(room) !== 'guessing') return;
-        if(!room.turnStart) return;
-        var remaining = (room.timerGuessSeconds||40)*1000 - (Date.now() - (room.turnStart || Date.now()));
-        if(remaining <= -500){ // safety margin
-          advanceTurnTransaction('guessTimeout');
-        }
-      });
-    }catch(e){}
-  }
-  setInterval(watchdog, 800);
-
-})();
-</script>
-<!-- ===== End Turn Token Guard ===== -->
 
 </body>
 </html>
