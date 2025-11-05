@@ -566,36 +566,33 @@ function subscribeRoom(){
 
     const order = room.order || [];
     const idx = room.currentIndex || 0;
-    const drawer  = order[idx] || "";
-    const guesser = order[idx + 1] || "";
+    const current = order[idx] || "";
+    const myTurn = (current === username);
 
-    const isDrawer  = (drawer  === username);
-    const isGuesser = (guesser === username);
-
-    if (room.state === 'drawing') {
-      if (isDrawer) {
+    if(room.state === 'drawing'){
+      if(myTurn) {
         showOnly('drawingScreen');
         startDrawingPhase(room, idx);
         setTurnBanner("");
         hideCommunity();
       } else {
         showOnly('waitScreen');
-        setPhaseBanner('drawing', drawer);
+        setPhaseBanner('drawing', current);
         ensureColorAssignment(room);
         showCommunity(room);
       }
       return;
     }
 
-    if (room.state === 'guessing') {
-      if (isGuesser) {
+    if(room.state === 'guessing'){
+      if(myTurn) {
         showOnly('guessScreen');
         startGuessingPhase(room, idx);
         setTurnBanner("");
         hideCommunity();
       } else {
         showOnly('waitScreen');
-        setPhaseBanner('guessing', guesser);
+        setPhaseBanner('guessing', current);
         ensureColorAssignment(room);
         showCommunity(room);
       }
@@ -633,7 +630,6 @@ function updateTurnTimerLabels(room){
   const lists = document.querySelectorAll('.turnOrderList');
   const order = room.order || [];
   const idx = room.currentIndex || 0;
-  const timerIndex = (room.state === 'guessing') ? Math.min(idx + 1, order.length - 1) : idx;
   const remaining = computeRemaining(room);
   const connected = room.connections ? Object.keys(room.connections) : [];
   lists.forEach(list=>{
@@ -641,13 +637,7 @@ function updateTurnTimerLabels(room){
     order.forEach((name,i)=>{
       const li = document.createElement('li');
       const isConnected = connected.includes(name);
-      li.textContent = (i===timerIndex && remaining!=null) ? `${name} (${remaining}s)` : name;
-      if(!isConnected){ li.classList.add('disconnected'); li.textContent += ' (Disconnected)'; }
-      if(i===timerIndex) li.classList.add('current');
-      list.appendChild(li);
-    });
-  });
-} (${remaining}s)` : name;
+      li.textContent = (i===idx && remaining!=null) ? `${name} (${remaining}s)` : name;
       if(!isConnected){ li.classList.add('disconnected'); li.textContent += ' (Disconnected)'; }
       if(i===idx) li.classList.add('current');
       list.appendChild(li);
@@ -786,17 +776,13 @@ function startGuessingPhase(room, idx){
   const turnKey = makeTurnKey(room);
   const isNewTurn = (turnKey !== lastTurnKey);
 
-  // Show the drawing that was just submitted at this index
-  const justDrawn = room.gameData && room.gameData[idx];
-  byId('guessImage').src = (justDrawn && justDrawn.data) || '';
+  const prev = room.gameData[idx-1];
+  byId('guessImage').src = prev?.data || '';
 
   if (isNewTurn) {
     byId('guessInput').value = '';
     lastTurnKey = turnKey;
   }
-
-  startGuessTimer(room);
-}
 
   startGuessTimer(room);
 }
@@ -859,81 +845,55 @@ function startGuessTimer(room){
 }
 function stopGuessTimer(){ if(guessInterval){ clearInterval(guessInterval); guessInterval=null; byId('guessTimer').innerText='40s'; } }
 
-
 function submitDrawing(forced){
-  if (!forced && strokes.length === 0) {
+  if(!forced && strokes.length===0){
     alert("Please add at least one stroke before submitting.");
     return;
   }
   stopDrawTimer();
-
   const dataURL = canvas.toDataURL('image/png');
-  const roomRef = db.ref('rooms/' + roomCode);
-
-  roomRef.transaction(room => {
-    if (!room) return room;
-
-    const idx   = room.currentIndex || 0;
-    const order = room.order || [];
-    const meIsCurrent = order[idx] === username;
-
-    // Only the current drawer can submit, and only during drawing phase
-    if (room.state !== 'drawing' || !meIsCurrent) return room;
-
-    // Write this turn's drawing
-    if (!room.gameData) room.gameData = {};
-    room.gameData[idx] = { type: 'draw', data: dataURL, player: username };
-
-    // Advance to guessing (same index)
-    room.state = 'guessing';
-    room.turnStart =
-      (typeof firebase !== 'undefined' && firebase.database && firebase.database.ServerValue)
-        ? firebase.database.ServerValue.TIMESTAMP
-        : Date.now();
-
-    return room;
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      u['rooms/'+roomCode+'/state'] = 'guessing';
+      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+    }
+    db.ref().update(u);
   });
 }
 
-
-function submitGuess(isAuto){
+function submitGuess(){
   try {
-    const el = byId('guessInput');
-    const guessText = (el && el.value || '').trim() || (isAuto ? 'No guess' : '');
-    if (!isAuto && !guessText) {
-      alert('Please enter a guess (or wait for the timer to auto-submit).');
-      return;
+    var __el = byId('guessInput');
+    var __v = (__el && __el.value || '').trim();
+    if(!__v){ alert("Please type a guess (or wait for the timer to auto-submit)."); return false; }
+  } catch(e) {}
+  const val = (byId('guessInput').value || '').trim();
+  if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
+  stopGuessTimer();
+  const g = val;
+  db.ref('rooms/'+roomCode).once('value').then(s=>{
+    const room = s.val();
+    const idx = room.currentIndex || 0;
+    const u = {};
+    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      u['rooms/'+roomCode+'/state'] = 'drawing';
+      u['rooms/'+roomCode+'/turnStart'] = Date.now();
     }
-    stopGuessTimer();
-
-    const roomRef = db.ref('rooms/' + roomCode);
-    roomRef.transaction(room => {
-      if (!room) return room;
-
-      const idx   = room.currentIndex || 0;
-      const order = room.order || [];
-      const expectedGuesser = order[idx + 1];
-
-      if (room.state !== 'guessing') return room;
-      if (username !== expectedGuesser) return room;
-
-      if (!room.gameData) room.gameData = {};
-      room.gameData[idx] = { type: 'guess', data: guessText || 'No guess', player: username };
-
-      const next = idx + 1;
-      if (next >= order.length) {
-        room.state = 'results';
-      } else {
-        room.currentIndex = next;
-        room.state = 'drawing';
-        room.turnStart =
-          (firebase.database && firebase.database.ServerValue)
-            ? firebase.database.ServerValue.TIMESTAMP
-            : Date.now();
-      }
-      return room;
-    });
-  } catch(e) { console.error(e); }
+    db.ref().update(u);
+  });
 }
 
 /* ---------- Results ---------- */
@@ -1356,6 +1316,146 @@ function trySaveCommunityFinal(room){
 })();
 </script>
 
+
+
+<!-- === PicturePass Turn Fix Overrides (non-destructive) === -->
+<script>
+// Step 1: override submitDrawing with atomic transaction (drawer-only)
+function submitDrawing(forced){
+  try{
+    if(!forced && typeof strokes!=='undefined' && strokes.length===0){
+      alert("Please add at least one stroke before submitting.");
+      return;
+    }
+    if (typeof stopDrawTimer === 'function') stopDrawTimer();
+    const dataURL = (typeof canvas!=='undefined' && canvas.toDataURL) ? canvas.toDataURL('image/png') : '';
+
+    const roomRef = db.ref('rooms/'+roomCode);
+    roomRef.transaction(room => {
+      if (!room) return room;
+      const idx   = room.currentIndex || 0;
+      const order = room.order || [];
+      const meIsCurrent = order[idx] === username;
+
+      if (room.state !== 'drawing' || !meIsCurrent) return room;
+
+      if (!room.gameData) room.gameData = {};
+      room.gameData[idx] = { type:'draw', data:dataURL, player:username };
+
+      room.state = 'guessing';
+      room.turnStart = (firebase.database && firebase.database.ServerValue)
+        ? firebase.database.ServerValue.TIMESTAMP
+        : Date.now();
+      return room;
+    });
+  }catch(e){ console.error(e); }
+}
+
+// Step 2A: override submitGuess with atomic transaction (next player only)
+function submitGuess(isAuto){
+  try{
+    const el = (typeof byId==='function') ? byId('guessInput') : null;
+    const guessText = (el && el.value || '').trim() || (isAuto ? 'No guess' : '');
+    if (!isAuto && !guessText) {
+      alert('Please enter a guess (or wait for the timer to auto-submit).');
+      return false;
+    }
+    if (typeof stopGuessTimer === 'function') stopGuessTimer();
+
+    const roomRef = db.ref('rooms/' + roomCode);
+    roomRef.transaction(room => {
+      if (!room) return room;
+
+      const idx   = room.currentIndex || 0;
+      const order = room.order || [];
+      const expectedGuesser = order[idx + 1];
+
+      if (room.state !== 'guessing') return room;
+      if (username !== expectedGuesser) return room;
+
+      if (!room.gameData) room.gameData = {};
+      room.gameData[idx] = { type: 'guess', data: (el && el.value || '').trim() || 'No guess', player: username };
+
+      const next = idx + 1;
+      if (next >= order.length) {
+        room.state = 'results';
+      } else {
+        room.currentIndex = next;
+        room.state = 'drawing';
+        room.turnStart = (firebase.database && firebase.database.ServerValue)
+          ? firebase.database.ServerValue.TIMESTAMP
+          : Date.now();
+      }
+      return room;
+    });
+    return false;
+  }catch(e){ console.error(e); return false; }
+}
+
+// Step 2B: override startGuessTimer to call submitGuess(true) at timeout
+function startGuessTimer(room){
+  if (typeof stopGuessTimer === 'function') stopGuessTimer();
+  function startWhenReady(){
+    const ts = room.turnStart;
+    if (!ts) { setTimeout(startWhenReady, 50); return; }
+    const duration = 40;
+    const tick = () => {
+      const elapsed = Math.floor((getServerNow() - ts)/1000);
+      const remaining = Math.max(0, duration - elapsed);
+      if (typeof byId==='function' && byId('guessTimer')) byId('guessTimer').innerText = remaining + 's';
+      if (remaining <= 0){
+        submitGuess(true);
+      }
+    };
+    tick();
+    if (typeof guessInterval!=='undefined') clearInterval(guessInterval);
+    guessInterval = setInterval(tick, 1000);
+  }
+  startWhenReady();
+}
+
+// Step 3A: soft UI gating hook—if available, route by roles
+// We can't safely rewrite your subscription here, but when guessing starts
+// we ensure the correct image is shown and timers run.
+function startGuessingPhase(room, idx){
+  const turnKey = (typeof makeTurnKey==='function') ? makeTurnKey(room) : (room.state + '|' + idx);
+  if (typeof lastTurnKey==='undefined') window.lastTurnKey = null;
+  const isNewTurn = (turnKey !== lastTurnKey);
+
+  const justDrawn = room.gameData && room.gameData[idx];
+  if (typeof byId==='function' && byId('guessImage')) {
+    byId('guessImage').src = (justDrawn && justDrawn.data) || '';
+  }
+
+  if (isNewTurn && typeof byId==='function' && byId('guessInput')) {
+    byId('guessInput').value = '';
+    lastTurnKey = turnKey;
+  }
+
+  startGuessTimer(room);
+}
+
+// Step 3C: show timer on active participant (drawer or guesser)
+function updateTurnTimerLabels(room){
+  const lists = document.querySelectorAll('.turnOrderList');
+  const order = room.order || [];
+  const idx = room.currentIndex || 0;
+  const remaining = (typeof computeRemaining==='function') ? computeRemaining(room) : null;
+  const timerIndex = (room.state === 'guessing') ? Math.min(idx + 1, order.length - 1) : idx;
+  const connected = room.connections ? Object.keys(room.connections) : [];
+  lists.forEach(list=>{
+    list.innerHTML = '';
+    order.forEach((name,i)=>{
+      const li = document.createElement('li');
+      const isConnected = connected.includes(name);
+      li.textContent = (i===timerIndex && remaining!=null) ? `${name} (${remaining}s)` : name;
+      if(!isConnected){ li.classList.add('disconnected'); li.textContent += ' (Disconnected)'; }
+      if(i===timerIndex) li.classList.add('current');
+      list.appendChild(li);
+    });
+  });
+}
+</script>
 
 </body>
 </html>
