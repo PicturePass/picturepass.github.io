@@ -566,33 +566,36 @@ function subscribeRoom(){
 
     const order = room.order || [];
     const idx = room.currentIndex || 0;
-    const current = order[idx] || "";
-    const myTurn = (current === username);
+    const drawer  = order[idx] || "";
+    const guesser = order[idx + 1] || "";
 
-    if(room.state === 'drawing'){
-      if(myTurn) {
+    const isDrawer  = (drawer  === username);
+    const isGuesser = (guesser === username);
+
+    if (room.state === 'drawing') {
+      if (isDrawer) {
         showOnly('drawingScreen');
         startDrawingPhase(room, idx);
         setTurnBanner("");
         hideCommunity();
       } else {
         showOnly('waitScreen');
-        setPhaseBanner('drawing', current);
+        setPhaseBanner('drawing', drawer);
         ensureColorAssignment(room);
         showCommunity(room);
       }
       return;
     }
 
-    if(room.state === 'guessing'){
-      if(myTurn) {
+    if (room.state === 'guessing') {
+      if (isGuesser) {
         showOnly('guessScreen');
         startGuessingPhase(room, idx);
         setTurnBanner("");
         hideCommunity();
       } else {
         showOnly('waitScreen');
-        setPhaseBanner('guessing', current);
+        setPhaseBanner('guessing', guesser);
         ensureColorAssignment(room);
         showCommunity(room);
       }
@@ -630,6 +633,7 @@ function updateTurnTimerLabels(room){
   const lists = document.querySelectorAll('.turnOrderList');
   const order = room.order || [];
   const idx = room.currentIndex || 0;
+  const timerIndex = (room.state === 'guessing') ? Math.min(idx + 1, order.length - 1) : idx;
   const remaining = computeRemaining(room);
   const connected = room.connections ? Object.keys(room.connections) : [];
   lists.forEach(list=>{
@@ -637,7 +641,13 @@ function updateTurnTimerLabels(room){
     order.forEach((name,i)=>{
       const li = document.createElement('li');
       const isConnected = connected.includes(name);
-      li.textContent = (i===idx && remaining!=null) ? `${name} (${remaining}s)` : name;
+      li.textContent = (i===timerIndex && remaining!=null) ? `${name} (${remaining}s)` : name;
+      if(!isConnected){ li.classList.add('disconnected'); li.textContent += ' (Disconnected)'; }
+      if(i===timerIndex) li.classList.add('current');
+      list.appendChild(li);
+    });
+  });
+} (${remaining}s)` : name;
       if(!isConnected){ li.classList.add('disconnected'); li.textContent += ' (Disconnected)'; }
       if(i===idx) li.classList.add('current');
       list.appendChild(li);
@@ -776,13 +786,17 @@ function startGuessingPhase(room, idx){
   const turnKey = makeTurnKey(room);
   const isNewTurn = (turnKey !== lastTurnKey);
 
-  const prev = room.gameData[idx-1];
-  byId('guessImage').src = prev?.data || '';
+  // Show the drawing that was just submitted at this index
+  const justDrawn = room.gameData && room.gameData[idx];
+  byId('guessImage').src = (justDrawn && justDrawn.data) || '';
 
   if (isNewTurn) {
     byId('guessInput').value = '';
     lastTurnKey = turnKey;
   }
+
+  startGuessTimer(room);
+}
 
   startGuessTimer(room);
 }
@@ -882,31 +896,44 @@ function submitDrawing(forced){
 }
 
 
-function submitGuess(){
+function submitGuess(isAuto){
   try {
-    var __el = byId('guessInput');
-    var __v = (__el && __el.value || '').trim();
-    if(!__v){ alert("Please type a guess (or wait for the timer to auto-submit)."); return false; }
-  } catch(e) {}
-  const val = (byId('guessInput').value || '').trim();
-  if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
-  stopGuessTimer();
-  const g = val;
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'drawing';
-      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+    const el = byId('guessInput');
+    const guessText = (el && el.value || '').trim() || (isAuto ? 'No guess' : '');
+    if (!isAuto && !guessText) {
+      alert('Please enter a guess (or wait for the timer to auto-submit).');
+      return;
     }
-    db.ref().update(u);
-  });
+    stopGuessTimer();
+
+    const roomRef = db.ref('rooms/' + roomCode);
+    roomRef.transaction(room => {
+      if (!room) return room;
+
+      const idx   = room.currentIndex || 0;
+      const order = room.order || [];
+      const expectedGuesser = order[idx + 1];
+
+      if (room.state !== 'guessing') return room;
+      if (username !== expectedGuesser) return room;
+
+      if (!room.gameData) room.gameData = {};
+      room.gameData[idx] = { type: 'guess', data: guessText || 'No guess', player: username };
+
+      const next = idx + 1;
+      if (next >= order.length) {
+        room.state = 'results';
+      } else {
+        room.currentIndex = next;
+        room.state = 'drawing';
+        room.turnStart =
+          (firebase.database && firebase.database.ServerValue)
+            ? firebase.database.ServerValue.TIMESTAMP
+            : Date.now();
+      }
+      return room;
+    });
+  } catch(e) { console.error(e); }
 }
 
 /* ---------- Results ---------- */
