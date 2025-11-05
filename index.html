@@ -207,11 +207,10 @@ Zpx; }
 <div class="infoPanel">
 <h4>Here's how the game works:</h4>
 <ul>
-<li>Host creates a room and picks the starting word/phrase.</li>
+<li>Host creates a room and picks the first word/phrase.</li>
 <li>Turns alternate: draw (80s) → guess (40s).</li>
-<li>Submit anytime; timer auto-submits when your turn is done.</li>
+<li>Submit anytime; timer auto-submits when it ends.</li>
 <li>See the full chain at the end!</li>
-<li>Disconnect mid-game? Enter the exact same username & room code to re-join in your same spot.</li>
 <li>Optional: Use the Community Doodle while you wait—everyone not taking a turn can sketch together in real time.</li></ul>
 </div>
 </div>
@@ -234,10 +233,7 @@ Zpx; }
 </div>
 <!-- Word select -->
 <div class="container hidden" id="wordSelectScreen">
-<h3>Enter a Word or Phrase</h3>
-<p class="muted" style="margin-top:4px; font-size:13px; text-align:center;">
-The crazier &amp; harder to guess, the better!
-</p>
+<h3>Pick a Word or Phrase</h3>
 <input id="customWord" placeholder="Enter custom word/phrase" type="text"/><br/><br/>
 <button onclick="suggestWord()">Suggest Word/Phrase</button>
 <button onclick="confirmWord()">Confirm &amp; Start Round</button>
@@ -292,47 +288,6 @@ The crazier &amp; harder to guess, the better!
 <img alt="Final Community Doodle" class="resultDrawing" id="communityResultImage"/>
 <div class="resultDivider"></div>
 </div>
-<!-- Save-as-PDF button + print CSS (Results page only) -->
-<div id="exportBar" class="no-print" style="margin:16px 0; text-align:center;">
-  <button onclick="window.print()" style="
-    padding:12px 18px;
-    border-radius:12px;
-    font-size:16px;
-    font-weight:600;
-    border:0;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.12);
-    cursor:pointer;
-  ">
-    🖨️ Save as PDF
-  </button>
-</div>
-
-<style>
-/* Print-only rules to make PDFs look great */
-@media print {
-  /* Show only the Results screen in the PDF */
-  body * { visibility: hidden !important; }
-  #resultsScreen, #resultsScreen * { visibility: visible !important; }
-  #resultsScreen { position: static !important; }
-
-  /* Hide UI chrome that shouldn't appear in the PDF */
-  .no-print, #restartBox, #confettiCanvas { display: none !important; }
-
-  /* Keep a player's turn (each Results block) together on the same page */
-  #resultsList > div { break-inside: avoid; page-break-inside: avoid; }
-  .resultStepHeader { break-after: avoid; }
-
-  /* Use the full page width for a clean layout */
-  .container { max-width: none !important; width: 100% !important; }
-
-  /* Preserve colors/backgrounds in print */
-  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
-
-/* Optional: nice page margins */
-@page { margin: 16mm; }
-</style>
-
 <div id="restartBox">
 <p><b>Ready for another round?</b><br/>
       Restart with the same players and shuffle everyone (including the host).</p>
