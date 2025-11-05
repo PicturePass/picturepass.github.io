@@ -292,8 +292,9 @@ The crazier &amp; harder to guess, the better!
 <img alt="Final Community Doodle" class="resultDrawing" id="communityResultImage"/>
 <div class="resultDivider"></div>
 </div>
-<!-- Save-as-PDF button (centered, larger) -->
+<!-- Save-as-PDF button + print CSS (Results page only) -->
 <div id="exportBar" class="no-print" style="margin:16px 0; text-align:center;">
+  <button onclick="window.print()" style="padding:8px 12px; border-radius:10px;">
   <button onclick="window.print()" style="
     padding:12px 18px;
     border-radius:12px;
@@ -310,42 +311,26 @@ The crazier &amp; harder to guess, the better!
 <style>
 /* Print-only rules to make PDFs look great */
 @media print {
-  /* Hide everything by default */
+  /* Show only the Results screen in the PDF */
   body * { visibility: hidden !important; }
-
-  /* Show the Results screen */
   #resultsScreen, #resultsScreen * { visibility: visible !important; }
   #resultsScreen { position: static !important; }
-
-  /* ALSO show existing global header bits at the very top of the PDF */
-  /* 🔁 Update these selectors to match your app: */
-  #appHeader, #appHeader *,
-  #topBar, #topBar *,
-  #emojiPillRow, .emojiPillRow, .emoji-pills,
-  #roomCodeDisplay, .roomCode {
-    visibility: visible !important;
-  }
-
-  /* Ensure those header bits are rendered above the results content */
-  #appHeader, #topBar { display: block !important; position: static !important; margin-bottom: 8px !important; }
-  #emojiPillRow, .emojiPillRow, .emoji-pills { display: block !important; margin: 6px 0 10px !important; }
-  #roomCodeDisplay, .roomCode { display: inline-block !important; margin: 0 0 10px 0 !important; }
 
   /* Hide UI chrome that shouldn't appear in the PDF */
   .no-print, #restartBox, #confettiCanvas { display: none !important; }
 
-  /* Keep each player's turn (each Results block) together on one page */
+  /* Keep a player's turn (each Results block) together on the same page */
   #resultsList > div { break-inside: avoid; page-break-inside: avoid; }
   .resultStepHeader { break-after: avoid; }
 
-  /* Full width for a clean layout */
+  /* Use the full page width for a clean layout */
   .container { max-width: none !important; width: 100% !important; }
 
   /* Preserve colors/backgrounds in print */
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
-/* Optional: page margins */
+/* Optional: nice page margins */
 @page { margin: 16mm; }
 </style>
 
