@@ -524,31 +524,10 @@ function suggestWord(){
   byId('customWord').value = random;
 }
 
-
 function confirmWord(){
   const cv = (byId('customWord')?.value || '').trim();
   if(!cv){ alert("Please enter a word or phrase before starting."); return; }
   const w = cv;
-  // Read room to know first player and create a 3s transition for everyone
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val() || {};
-    const first = (room.order && room.order.length) ? room.order[0] : room.host;
-    const updates = {};
-    updates['rooms/'+roomCode+'/word'] = w;
-    updates['rooms/'+roomCode+'/transition'] = {
-      active: true,
-      nextPlayer: first,
-      nextPhase: 'drawing',
-      start: firebase.database.ServerValue.TIMESTAMP,
-      ms: 3000
-    };
-    updates['rooms/'+roomCode+'/state'] = 'transition';
-    updates['rooms/'+roomCode+'/currentIndex'] = 0;
-    updates['rooms/'+roomCode+'/turnStart'] = null; // actual start set after transition
-    return db.ref().update(updates);
-  });
-}
-const w = cv;
   db.ref('rooms/'+roomCode).update({ word: w, state: 'drawing', currentIndex: 0, turnStart: firebase.database.ServerValue.TIMESTAMP });
 }
 
@@ -866,40 +845,12 @@ function startGuessTimer(room){
 }
 function stopGuessTimer(){ if(guessInterval){ clearInterval(guessInterval); guessInterval=null; byId('guessTimer').innerText='40s'; } }
 
-
 function submitDrawing(forced){
   if(!forced && strokes.length===0){
     alert("Please add at least one stroke before submitting.");
     return;
   }
   stopDrawTimer();
-  const dataURL = canvas.toDataURL('image/png');
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      const nextPlayer = (room.order||[])[next] || '';
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      // Set a 3s transition for ALL players before guessing starts
-      u['rooms/'+roomCode+'/transition'] = {
-        active: true,
-        nextPlayer: nextPlayer,
-        nextPhase: 'guessing',
-        start: firebase.database.ServerValue.TIMESTAMP,
-        ms: 3000
-      };
-      u['rooms/'+roomCode+'/state'] = 'transition';
-      u['rooms/'+roomCode+'/turnStart'] = null; // will set after transition
-    }
-    db.ref().update(u);
-  });
-}
-stopDrawTimer();
   const dataURL = canvas.toDataURL('image/png');
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
@@ -918,43 +869,12 @@ stopDrawTimer();
   });
 }
 
-
 function submitGuess(){
   try {
     var __el = byId('guessInput');
     var __v = (__el && __el.value || '').trim();
     if(!__v){ alert("Please type a guess (or wait for the timer to auto-submit)."); return false; }
   } catch(e) {}
-  const val = (byId('guessInput').value || '').trim();
-  if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
-  stopGuessTimer();
-  const g = val;
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      const nextPlayer = (room.order||[])[next] || '';
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      // Set a 3s transition for ALL players before drawing starts
-      u['rooms/'+roomCode+'/transition'] = {
-        active: true,
-        nextPlayer: nextPlayer,
-        nextPhase: 'drawing',
-        start: firebase.database.ServerValue.TIMESTAMP,
-        ms: 3000
-      };
-      u['rooms/'+roomCode+'/state'] = 'transition';
-      u['rooms/'+roomCode+'/turnStart'] = null; // will set after transition
-    }
-    db.ref().update(u);
-  });
-}
-} catch(e) {}
   const val = (byId('guessInput').value || '').trim();
   if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
   stopGuessTimer();
@@ -1397,89 +1317,155 @@ function trySaveCommunityFinal(room){
 </script>
 
 
+</body>
 
-<!-- ===== Global Turn Transition (synchronized 3s pause for everyone) ===== -->
-<style>
-  #turnTransition { display:none; position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.65); align-items:center; justify-content:center; }
-  #turnTransition .tt-card { background:#fff; border:2px solid #cbd5e0; border-radius:16px; padding:22px 28px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,.18); max-width:90vw; }
-  #turnTransition .tt-title { font-size:14px; color:#475569; margin-bottom:4px; letter-spacing:.4px; }
-  #turnTransition .tt-name  { font-size:24px; font-weight:800; color:#0b66b2; margin:4px 0 8px; }
-  #turnTransition .tt-phase { display:inline-block; padding:6px 14px; border-radius:9999px; border:2px solid #22c55e; background:#BBF7D0; color:#14532d; font-weight:700; margin-bottom:10px; }
-  #turnTransition .tt-sub   { font-size:13px; color:#1f2937; opacity:.85; }
-</style>
-<div id="turnTransition">
-  <div class="tt-card">
-    <div class="tt-title">Next up</div>
-    <div id="ttPlayer" class="tt-name">Player</div>
-    <div id="ttPhase"  class="tt-phase">Drawing</div>
-    <div class="tt-sub">Pausing for 3 seconds between turns…</div>
-  </div>
-</div>
+<!-- ===== Auto-Injected Turn Transition (robust version) ===== -->
 <script>
 (function(){
-  var overlay     = document.getElementById('turnTransition');
-  var nameEl      = document.getElementById('ttPlayer');
-  var phaseEl     = document.getElementById('ttPhase');
-  var roomListenerAttached = false;
+  // Safe guards
+  function getDB(){ try{ return (firebase && firebase.database && firebase.database()); }catch(e){ return null; } }
+  function getRef(path){ var db = getDB(); return db ? db.ref(path) : null; }
+  function now(){ return Date.now(); }
 
+  // Create overlay DOM dynamically (so nothing needed in HTML)
+  function ensureOverlay(){
+    if (document.getElementById('tt__overlay')) return;
+    var style = document.createElement('style');
+    style.id = 'tt__style';
+    style.textContent = [
+      '#tt__overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:100000;',
+      'align-items:center;justify-content:center}',
+      '#tt__card{background:#fff;border:2px solid #cbd5e0;border-radius:16px;padding:22px 28px;',
+      'max-width:90vw;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.18)}',
+      '#tt__title{font-size:14px;color:#475569;margin-bottom:4px;letter-spacing:.4px}',
+      '#tt__name{font-size:24px;font-weight:800;color:#0b66b2;margin:4px 0 8px}',
+      '#tt__phase{display:inline-block;padding:6px 14px;border-radius:9999px;border:2px solid #22c55e;',
+      'background:#BBF7D0;color:#14532d;font-weight:700;margin-bottom:10px}',
+      '#tt__sub{font-size:13px;color:#1f2937;opacity:.8}'
+    ].join('');
+    var overlay = document.createElement('div');
+    overlay.id = 'tt__overlay';
+    overlay.innerHTML = '<div id="tt__card">'
+      + '<div id="tt__title">Next up</div>'
+      + '<div id="tt__name">Player</div>'
+      + '<div id="tt__phase">Drawing</div>'
+      + '<div id="tt__sub" class="tt-sub">Pausing for 3 seconds between turns…</div>'
+      + '</div>';
+    document.documentElement.appendChild(style);
+    document.documentElement.appendChild(overlay);
+  }
   function showOverlay(player, phase){
-    try{
-      if(nameEl)  nameEl.textContent  = player || '';
-      if(phaseEl) phaseEl.textContent = (phase === 'drawing' ? 'Drawing' : 'Guessing');
-      try { if (typeof hideCommunity === 'function') hideCommunity(); } catch(e){}
-      overlay.style.display = 'flex';
-    }catch(e){ console.error(e); }
+    ensureOverlay();
+    var overlay = document.getElementById('tt__overlay');
+    if (!overlay) return;
+    var name = document.getElementById('tt__name');
+    var ph = document.getElementById('tt__phase');
+    if (name) name.textContent = player || '';
+    if (ph) ph.textContent = (phase === 'guessing' ? 'Guessing' : 'Drawing');
+    // Try to pause inputs if helpers exist
+    try{ if (typeof hideCommunity === 'function') hideCommunity(); }catch(e){}
+    overlay.style.display = 'flex';
   }
   function hideOverlay(){
-    try{
-      overlay.style.display = 'none';
-      try { if (typeof maybeShowCommunity === 'function') maybeShowCommunity(); } catch(e){}
-    }catch(e){}
+    var overlay = document.getElementById('tt__overlay');
+    if (overlay) overlay.style.display = 'none';
+    try{ if (typeof maybeShowCommunity === 'function') maybeShowCommunity(); }catch(e){}
   }
 
-  function nowFromOffset(room){
-    // If you maintain a serverOffset elsewhere, you could use that here.
-    return Date.now();
+  function keyFromRoom(room){
+    var idx = (room && room.currentIndex) || 0;
+    var st  = (room && room.state) || '';
+    var ts  = (room && room.turnStart) || 0;
+    return st + '|' + idx + '|' + ts;
   }
 
-  function handleRoom(room){
-    if(!room) return;
-    if(room.state === 'transition'){
+  var lastObservedKey = null;
+  var listenerAttached = false;
+  var attaching = false;
+
+  function attach(){
+    if (listenerAttached || attaching) return;
+    attaching = true;
+    var tryAttach = setInterval(function(){
+      try{
+        if (!window.roomCode || !getDB()) return;
+        var ref = getRef('rooms/' + window.roomCode);
+        if (!ref) return;
+        ref.on('value', function(snap){
+          var room = snap.val() || {};
+          onRoom(room);
+        });
+        listenerAttached = true;
+        clearInterval(tryAttach);
+      }catch(e){ /* keep trying */ }
+    }, 400);
+  }
+
+  function onRoom(room){
+    if (!room) return;
+    var order = room.order || [];
+    var idx   = room.currentIndex || 0;
+    var currP = order[idx] || '';
+    var st    = room.state || '';
+    var key   = keyFromRoom(room);
+    var host  = room.host || '';
+
+    // If currently in transition, ensure overlay is visible for everyone
+    if (st === 'transition'){
       var tr = room.transition || {};
-      showOverlay(tr.nextPlayer || '', tr.nextPhase || 'drawing');
-
-      // Host resumes phase after 3s
-      var isHost = (room.host === username);
-      var start  = (typeof tr.start === 'number') ? tr.start : 0;
-      var ms     = tr.ms || 3000;
-      var elapsed = nowFromOffset(room) - start;
-
-      if(isHost && elapsed >= ms){
-        var updates = {};
-        updates['rooms/'+roomCode+'/state'] = tr.nextPhase || 'drawing';
-        updates['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-        updates['rooms/'+roomCode+'/transition'] = null;
-        db.ref().update(updates).catch(console.error);
-      }
+      var nextP  = tr.nextPlayer || currP;
+      var nextPh = tr.nextPhase || 'drawing';
+      showOverlay(nextP, nextPh);
       return;
+    } else {
+      // Not in transition, hide overlay
+      hideOverlay();
     }
-    // Not in transition
-    hideOverlay();
+
+    // Detect a new turn starting (change in key when st in {drawing, guessing})
+    if ((st === 'drawing' || st === 'guessing') && key !== lastObservedKey){
+      lastObservedKey = key;
+
+      // Host attempts to gate via transition state for 3s; others just show fallback overlay
+      var iAmHost = (window.username && host && window.username === host);
+      var intendedPhase = st;
+      var nextPlayer = currP;
+
+      if (iAmHost){
+        var updates = {};
+        var tr = {
+          active: true,
+          nextPlayer: nextPlayer,
+          nextPhase: intendedPhase,
+          start: firebase.database.ServerValue.TIMESTAMP,
+          ms: 3000
+        };
+        updates['rooms/'+roomCode+'/transition'] = tr;
+        updates['rooms/'+roomCode+'/state'] = 'transition';
+        updates['rooms/'+roomCode+'/turnStart'] = null;
+
+        getDB().ref().update(updates).catch(function(err){
+          // If write fails (rules/etc), do a client-only overlay so user experience still shows pause
+          clientOnlyGate(nextPlayer, intendedPhase);
+        });
+      } else {
+        // Non-host: show client overlay immediately; it will be superseded if host flips to 'transition'
+        clientOnlyGate(nextPlayer, intendedPhase);
+      }
+    }
   }
 
-  // Attach after roomCode is set
-  var attachInt = setInterval(function(){
-    try{
-      if(!roomListenerAttached && roomCode && db){
-        db.ref('rooms/'+roomCode).on('value', snap => handleRoom(snap.val()));
-        roomListenerAttached = true;
-        clearInterval(attachInt);
-      }
-    }catch(e){}
-  }, 300);
+  function clientOnlyGate(nextPlayer, intendedPhase){
+    // Show overlay for ~3s optimistically
+    showOverlay(nextPlayer, intendedPhase);
+    setTimeout(hideOverlay, 3000);
+  }
+
+  // Kick off
+  ensureOverlay(); // build UI immediately
+  attach();
 })();
 </script>
-<!-- ===== End Global Turn Transition ===== -->
+<!-- ===== End Auto-Injected Turn Transition ===== -->
 
-</body>
 </html>
