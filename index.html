@@ -845,29 +845,42 @@ function startGuessTimer(room){
 }
 function stopGuessTimer(){ if(guessInterval){ clearInterval(guessInterval); guessInterval=null; byId('guessTimer').innerText='40s'; } }
 
+
 function submitDrawing(forced){
-  if(!forced && strokes.length===0){
+  if (!forced && strokes.length === 0) {
     alert("Please add at least one stroke before submitting.");
     return;
   }
   stopDrawTimer();
+
   const dataURL = canvas.toDataURL('image/png');
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'guessing';
-      u['rooms/'+roomCode+'/turnStart'] = Date.now();
-    }
-    db.ref().update(u);
+  const roomRef = db.ref('rooms/' + roomCode);
+
+  roomRef.transaction(room => {
+    if (!room) return room;
+
+    const idx   = room.currentIndex || 0;
+    const order = room.order || [];
+    const meIsCurrent = order[idx] === username;
+
+    // Only the current drawer can submit, and only during drawing phase
+    if (room.state !== 'drawing' || !meIsCurrent) return room;
+
+    // Write this turn's drawing
+    if (!room.gameData) room.gameData = {};
+    room.gameData[idx] = { type: 'draw', data: dataURL, player: username };
+
+    // Advance to guessing (same index)
+    room.state = 'guessing';
+    room.turnStart =
+      (typeof firebase !== 'undefined' && firebase.database && firebase.database.ServerValue)
+        ? firebase.database.ServerValue.TIMESTAMP
+        : Date.now();
+
+    return room;
   });
 }
+
 
 function submitGuess(){
   try {
