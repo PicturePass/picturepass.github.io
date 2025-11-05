@@ -1387,5 +1387,70 @@ function trySaveCommunityFinal(room){
 </script>
 <!-- === End stroke squelch === -->
 
+
+<!-- === Enhanced stroke squelch (force-capture release + synthetic ups) === -->
+<script>
+(function(){
+  var lastKey2 = null;
+
+  function forceEndOnCanvas(c){
+    try{
+      // Try to release a handful of possible pointerIds
+      for (var pid=0; pid<16; pid++){
+        try { c.releasePointerCapture(pid); } catch(_) {}
+      }
+      // End current path
+      try {
+        var ctx = c.getContext && c.getContext('2d');
+        if(ctx){
+          if(ctx.closePath) ctx.closePath();
+          if(ctx.beginPath) ctx.beginPath();
+        }
+      } catch(_) {}
+      // Synthetic events to trip any handlers
+      var evTypes = ['pointercancel','pointerup','mouseup','touchend'];
+      evTypes.forEach(function(type){
+        try { c.dispatchEvent(new Event(type, {bubbles:true,cancelable:true})); } catch(_){}
+      });
+      // Briefly disable pointer-events to swallow stragglers
+      var prev = c.style.pointerEvents;
+      c.style.pointerEvents = 'none';
+      setTimeout(function(){ c.style.pointerEvents = prev; }, 550);
+    }catch(_){}
+  }
+
+  function endAllStrokesAggressive(){
+    // Common flags
+    try{ if(typeof window.isDrawing !== 'undefined') window.isDrawing = false; }catch(_){}
+    try{ if(typeof window.isDrawingCommunity !== 'undefined') window.isDrawingCommunity = false; }catch(_){}
+    try{ if(typeof window.drawing !== 'undefined') window.drawing = false; }catch(_){}
+    // Known canvases (community doodle often labeled by heading text; fall back to all canvases)
+    var canvases = Array.prototype.slice.call(document.querySelectorAll('canvas'));
+    canvases.forEach(forceEndOnCanvas);
+  }
+
+  function handleRoom2(room){
+    if(!room) return;
+    var key = (room.state||'') + '|' + (room.currentIndex||0) + '|' + (room.turnStart||0);
+    if(key !== lastKey2){
+      lastKey2 = key;
+      endAllStrokesAggressive();
+    }
+  }
+
+  var attached2 = false;
+  var t2 = setInterval(function(){
+    try{
+      if(attached2) return;
+      if(!window.roomCode || !window.firebase) return;
+      firebase.database().ref('rooms/' + roomCode).on('value', function(snap){ handleRoom2(snap.val()); });
+      attached2 = true;
+      clearInterval(t2);
+    }catch(e){}
+  }, 300);
+})();
+</script>
+<!-- === End enhanced squelch === -->
+
 </body>
 </html>
