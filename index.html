@@ -1318,51 +1318,23 @@ function trySaveCommunityFinal(room){
 
 
 
-<!-- ===== Turn Transition Overlay (inserts a 3s pause between turns for non-active players) ===== -->
+<!-- ===== Synced Turn Transition (3s for everyone between turns) ===== -->
 <style>
   #turnTransition {
-    display: none;
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6);
-    z-index: 10000;
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.65);
     align-items: center; justify-content: center;
   }
   #turnTransition .tt-card {
-    background: #ffffff;
-    border: 2px solid #cbd5e0;
-    border-radius: 16px;
-    padding: 22px 28px;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
-    max-width: 90vw;
+    background: #fff; border: 2px solid #cbd5e0; border-radius: 16px;
+    padding: 22px 28px; max-width: 90vw; text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,.18);
   }
-  #turnTransition .tt-title {
-    font-size: 15px;
-    color: #5b6b7a;
-    margin-bottom: 6px;
-    letter-spacing: .4px;
-  }
-  #turnTransition .tt-name {
-    font-size: 24px;
-    font-weight: 800;
-    color: #0b66b2;
-    margin: 2px 0 6px;
-  }
-  #turnTransition .tt-phase {
-    display: inline-block;
-    padding: 6px 14px;
-    border-radius: 9999px;
-    border: 2px solid #22c55e;
-    background: #BBF7D0;
-    color: #14532d;
-    font-weight: 700;
-    margin-bottom: 10px;
-  }
-  #turnTransition .tt-sub {
-    font-size: 13px;
-    color: #1e293b;
-    opacity: .8;
-  }
+  #turnTransition .tt-title { font-size: 14px; color: #475569; margin-bottom: 4px; letter-spacing:.4px; }
+  #turnTransition .tt-name { font-size: 24px; font-weight: 800; color: #0b66b2; margin: 4px 0 8px; }
+  #turnTransition .tt-phase { display:inline-block; padding: 6px 14px; border-radius: 9999px;
+    border:2px solid #22c55e; background:#BBF7D0; color:#14532d; font-weight:700; margin-bottom:10px; }
+  #turnTransition .tt-sub { font-size: 13px; color:#1f2937; opacity:.8; }
 </style>
 
 <div id="turnTransition">
@@ -1370,75 +1342,153 @@ function trySaveCommunityFinal(room){
     <div class="tt-title">Next up</div>
     <div id="ttPlayer" class="tt-name">Player</div>
     <div id="ttPhase" class="tt-phase">Drawing</div>
-    <div class="tt-sub">Community Doodle is paused briefly…</div>
+    <div class="tt-sub">Pausing for 3 seconds between turns…</div>
   </div>
 </div>
 
 <script>
-// Lightweight overlay controller that listens to room changes and shows a
-// 3s transition card for NON-active players whenever a new turn begins.
-// It does NOT delay timers; only waiting players see the pause and the
-// Community Doodle input is hidden during the overlay.
 (function(){
-  var overlayListenerAttached = false;
-  var lastTurnKeySeenForOverlay = null;
+  // Requirements this script assumes exist in your file:
+  //   - firebase + db = firebase.database()
+  //   - window.username, window.roomCode
+  //   - room schema: {host, players, order, currentIndex, state, turnStart}
+  // This is a "sidecar" that gates every new 'drawing'/'guessing' turn behind a 3s 'transition' state for ALL players.
+  // It is minimally invasive and doesn't change your normal UI router; it only injects a 'transition' state.
 
-  function showTurnTransition(nextPlayer, phase){
+  var overlay = document.getElementById('turnTransition');
+  var ttName  = document.getElementById('ttPlayer');
+  var ttPhase = document.getElementById('ttPhase');
+
+  function showOverlay(name, phase){
     try{
-      var el = document.getElementById('turnTransition');
-      if(!el) return;
-      var elmP = document.getElementById('ttPlayer');
-      var elmPh = document.getElementById('ttPhase');
-      if(elmP) elmP.textContent = nextPlayer || '';
-      if(elmPh) elmPh.textContent = (phase === 'drawing' ? 'Drawing' : 'Guessing');
-      // Pause Community Doodle inputs while overlay is up
-      try { hideCommunity(); } catch(e){}
-      el.style.display = 'flex';
-      setTimeout(function(){
-        el.style.display = 'none';
-        // Waiters will naturally get routed back to the waiting screen by existing router,
-        // and Community Doodle will re-show there.
-      }, 3000);
+      if (ttName)  ttName.textContent  = name || '';
+      if (ttPhase) ttPhase.textContent = (phase==='drawing' ? 'Drawing' : 'Guessing');
+      // Hide Community Doodle / inputs while overlay is up (if helpers exist)
+      try { if (typeof hideCommunity === 'function') hideCommunity(); } catch(e){}
+      overlay.style.display = 'flex';
     }catch(e){ console.error(e); }
   }
+  function hideOverlay(){
+    try{
+      overlay.style.display = 'none';
+      // Router will reveal appropriate UI afterwards (drawing/guessing/wait)
+      try { if (typeof maybeShowCommunity === 'function') maybeShowCommunity(); } catch(e){}
+    }catch(e){}
+  }
 
-  function handleTransitionOverlay(room){
+  function serverNowFallback(room){ // approximate; transition uses server timestamps so values are numeric when received
+    return Date.now();
+  }
+
+  function computeKey(room){
+    var idx = room && room.currentIndex || 0;
+    var st  = room && room.state || '';
+    var ts  = room && room.turnStart || 0;
+    return st + '|' + idx + '|' + ts;
+  }
+
+  var overlayListenerAttached = false;
+  var lastKeySeen = null;
+
+  function handleRoom(room){
     if(!room) return;
-    var order = room.order || [];
-    var idx = room.currentIndex || 0;
-    var current = order[idx] || '';
-    var phase = room.state || '';
-    var key = (function(){
-      var idx = room && room.currentIndex || 0;
-      var phase = room && room.state || '';
-      var ts = room && room.turnStart || 0;
-      return phase + '#' + idx + '#' + ts;
-    })();
 
-    if(key && key !== lastTurnKeySeenForOverlay){
-      lastTurnKeySeenForOverlay = key;
-      // Only show overlay in active phases and only for players who are NOT up
-      var myTurn = (current === (window.username || ''));
-      if((phase === 'drawing' || phase === 'guessing') && !myTurn){
-        showTurnTransition(current, phase);
+    var isHost = (room.host === window.username);
+    var idx    = room.currentIndex || 0;
+    var order  = room.order || [];
+    var currP  = order[idx] || room.host || '';
+    var st     = room.state || '';
+    var key    = computeKey(room);
+
+    // 1) If we're in 'transition', show overlay for ALL players, then host flips to intended phase after 3s
+    if (st === 'transition'){
+      var tr = room.transition || {};
+      var nextP   = tr.nextPlayer || currP;
+      var nextPh  = tr.nextPhase  || 'drawing';
+      var start   = tr.start || 0;       // server-resolved number
+      var ms      = tr.ms || 3000;
+      showOverlay(nextP, nextPh);
+
+      var elapsed = 0;
+      if (typeof start === 'number') {
+        elapsed = serverNowFallback(room) - start;
+      }
+
+      if (elapsed >= ms && isHost){
+        // Host resumes intended state, starts the turn, and sets a brief noGate window to avoid loops.
+        var u = {};
+        u['rooms/'+roomCode+'/state'] = nextPh;
+        u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
+        u['rooms/'+roomCode+'/transition'] = null;
+        u['rooms/'+roomCode+'/noGateUntil'] = firebase.database.ServerValue.TIMESTAMP; // will add 2s below via transaction
+
+        // First push the state change; then extend noGateUntil by +2000ms
+        db.ref().update(u).then(function(){
+          // Bump noGateUntil by +2000ms using current server time
+          db.ref('rooms/'+roomCode+'/noGateUntil').transaction(function(cur){
+            // cur is server timestamp from above; we add 2000 to it.
+            if (typeof cur === 'number') return cur + 2000;
+            return cur;
+          });
+        }).catch(console.error);
+      }
+      if (elapsed < ms){
+        // Keep showing overlay
+      } else {
+        // The host changed state; hide overlay locally once router switches
+        setTimeout(hideOverlay, 50);
+      }
+      return;
+    }
+
+    hideOverlay(); // ensure hidden outside transition
+
+    // 2) If a new 'drawing' or 'guessing' turn starts, gate it behind a transition (host only), unless within noGateUntil
+    if (st === 'drawing' || st === 'guessing'){
+      var noGateUntil = room.noGateUntil || 0;
+      var now = serverNowFallback(room);
+      var safeToGate = (now > noGateUntil);
+
+      if (safeToGate && isHost){
+        // Ensure we only gate once per observed key
+        if (lastKeySeen !== key){
+          lastKeySeen = key;
+
+          var tr = {
+            active: true,
+            nextPlayer: currP,
+            nextPhase: st,
+            start: firebase.database.ServerValue.TIMESTAMP,
+            ms: 3000
+          };
+
+          var u = {};
+          u['rooms/'+roomCode+'/transition'] = tr;
+          u['rooms/'+roomCode+'/state'] = 'transition';
+          // Clear turnStart so the real start happens AFTER the 3s gate
+          u['rooms/'+roomCode+'/turnStart'] = null;
+          // Also set noGateUntil to now so we won't instantly re-gate after returning
+          u['rooms/'+roomCode+'/noGateUntil'] = firebase.database.ServerValue.TIMESTAMP;
+
+          db.ref().update(u).catch(console.error);
+        }
       }
     }
   }
 
-  // Attach a second passive listener once we have a roomCode
+  // Attach dedicated listener (separate from your main router)
   var attachTimer = setInterval(function(){
     try{
-      if(!overlayListenerAttached && window.roomCode){
-        var ref = firebase.database().ref('rooms/' + window.roomCode);
-        ref.on('value', function(snap){ handleTransitionOverlay(snap.val()); });
+      if(!overlayListenerAttached && window.roomCode && window.firebase && window.db){
+        db.ref('rooms/'+roomCode).on('value', function(snap){ handleRoom(snap.val()); });
         overlayListenerAttached = true;
         clearInterval(attachTimer);
       }
-    }catch(e){ /* try again next tick */ }
+    }catch(e){ /* will try again */ }
   }, 400);
 })();
 </script>
-<!-- ===== End Turn Transition Overlay ===== -->
+<!-- ===== End Synced Turn Transition ===== -->
 
 </body>
 </html>
