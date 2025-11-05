@@ -564,21 +564,12 @@ function subscribeRoom(){
       return;
     }
 
-    if(room.state === 'turnTransition'){
-      hideCommunity();
-      showOnly('waitScreen'); // everyone waits behind overlay
-      const info = room.transition || {};
-      showTurnTransition(info);
-      // Also kick a delayed promotion attempt (clients race-safe via transaction)
-      setTimeout(()=>promoteAfterTransition(), 3500);
-      return;
-    }
     const order = room.order || [];
     const idx = room.currentIndex || 0;
     const current = order[idx] || "";
     const myTurn = (current === username);
 
-    if(room.state === 'drawing'){ hideTurnTransition();
+    if(room.state === 'drawing'){
       if(myTurn) {
         showOnly('drawingScreen');
         startDrawingPhase(room, idx);
@@ -593,7 +584,7 @@ function subscribeRoom(){
       return;
     }
 
-    if(room.state === 'guessing'){ hideTurnTransition();
+    if(room.state === 'guessing'){
       if(myTurn) {
         showOnly('guessScreen');
         startGuessingPhase(room, idx);
@@ -608,7 +599,7 @@ function subscribeRoom(){
       return;
     }
 
-    if(room.state === 'results'){ hideTurnTransition();
+    if(room.state === 'results'){
       stopSharedTurnTicker();
       setTurnBanner("");
       hideCommunity();
@@ -864,28 +855,6 @@ function submitDrawing(forced){
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
     const idx = room.currentIndex || 0;
-    const order = room.order || [];
-    const nextPlayer = order[idx + 1] || '';
-    const until = getServerNow() + 3000; // 3s
-
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
-    // Enter transition to guessing (same idx)
-    u['rooms/'+roomCode+'/state'] = 'turnTransition';
-    u['rooms/'+roomCode+'/transition'] = {
-      nextState: 'guessing',
-      player: nextPlayer,
-      role: 'guessing',
-      until: until,
-      idx: idx
-    };
-    db.ref().update(u);
-  });
-}stopDrawTimer();
-  const dataURL = canvas.toDataURL('image/png');
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
     const u = {};
     u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
     const next = idx + 1;
@@ -906,32 +875,6 @@ function submitGuess(){
     var __v = (__el && __el.value || '').trim();
     if(!__v){ alert("Please type a guess (or wait for the timer to auto-submit)."); return false; }
   } catch(e) {}
-  const val = (byId('guessInput').value || '').trim();
-  if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
-  stopGuessTimer();
-  const g = val;
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const order = room.order || [];
-    const nextIdx = idx + 1;
-    const nextDrawer = order[nextIdx] || '';
-    const until = getServerNow() + 3000; // 3s
-
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
-    // Enter transition to drawing for nextIdx
-    u['rooms/'+roomCode+'/state'] = 'turnTransition';
-    u['rooms/'+roomCode+'/transition'] = {
-      nextState: 'drawing',
-      player: nextDrawer,
-      role: 'drawing',
-      until: until,
-      idx: nextIdx
-    };
-    db.ref().update(u);
-  });
-}} catch(e) {}
   const val = (byId('guessInput').value || '').trim();
   if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
   stopGuessTimer();
@@ -1375,93 +1318,127 @@ function trySaveCommunityFinal(room){
 
 
 
-<!-- Turn Transition Overlay -->
+<!-- ===== Turn Transition Overlay (inserts a 3s pause between turns for non-active players) ===== -->
 <style>
-#turnTransitionOverlay{
-  position: fixed; inset: 0; background: rgba(15,18,22,0.72);
-  display: none; align-items: center; justify-content: center; z-index: 9998;
-  backdrop-filter: blur(2px);
-}
-#turnTransitionCard{
-  background: #ffffff; border-radius: 16px; padding: 22px 26px; text-align: center;
-  max-width: 520px; width: 92%; box-shadow: 0 10px 30px rgba(0,0,0,0.18);
-  border: 2px solid var(--border);
-}
-#turnTransitionCard h3{ margin: 8px 0 6px; color: var(--accent); font-size: 1.4em; }
-#turnTransitionCard p{ margin: 0; color: var(--muted); }
-#turnTransitionCountdown{ font-weight: 800; font-size: 28px; margin-top: 10px; color: var(--accent); }
+  #turnTransition {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 10000;
+    align-items: center; justify-content: center;
+  }
+  #turnTransition .tt-card {
+    background: #ffffff;
+    border: 2px solid #cbd5e0;
+    border-radius: 16px;
+    padding: 22px 28px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    max-width: 90vw;
+  }
+  #turnTransition .tt-title {
+    font-size: 15px;
+    color: #5b6b7a;
+    margin-bottom: 6px;
+    letter-spacing: .4px;
+  }
+  #turnTransition .tt-name {
+    font-size: 24px;
+    font-weight: 800;
+    color: #0b66b2;
+    margin: 2px 0 6px;
+  }
+  #turnTransition .tt-phase {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    border: 2px solid #22c55e;
+    background: #BBF7D0;
+    color: #14532d;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  #turnTransition .tt-sub {
+    font-size: 13px;
+    color: #1e293b;
+    opacity: .8;
+  }
 </style>
-<div id="turnTransitionOverlay" class="no-select">
-  <div id="turnTransitionCard">
-    <div id="turnTransitionEmoji" style="font-size:30px;">⌛</div>
-    <h3 id="turnTransitionTitle">Next up…</h3>
-    <p id="turnTransitionSub">Get ready!</p>
-    <div id="turnTransitionCountdown">3</div>
+
+<div id="turnTransition">
+  <div class="tt-card">
+    <div class="tt-title">Next up</div>
+    <div id="ttPlayer" class="tt-name">Player</div>
+    <div id="ttPhase" class="tt-phase">Drawing</div>
+    <div class="tt-sub">Community Doodle is paused briefly…</div>
   </div>
 </div>
 
-
 <script>
-/* ---- Turn Transition Helpers ---- */
-let __transitionTimer = null;
-function showTurnTransition(info){
-  try {
-    const ov = document.getElementById('turnTransitionOverlay');
-    const t  = document.getElementById('turnTransitionTitle');
-    const s  = document.getElementById('turnTransitionSub');
-    const e  = document.getElementById('turnTransitionEmoji');
-    const c  = document.getElementById('turnTransitionCountdown');
+// Lightweight overlay controller that listens to room changes and shows a
+// 3s transition card for NON-active players whenever a new turn begins.
+// It does NOT delay timers; only waiting players see the pause and the
+// Community Doodle input is hidden during the overlay.
+(function(){
+  var overlayListenerAttached = false;
+  var lastTurnKeySeenForOverlay = null;
 
-    const isGuess = (info && info.role === 'guessing');
-    e.textContent = isGuess ? '💭' : '🖌️';
-    t.textContent = `Next up: ${info?.player || '—'}`;
-    s.textContent = isGuess ? 'They will be guessing.' : 'They will be drawing.';
+  function showTurnTransition(nextPlayer, phase){
+    try{
+      var el = document.getElementById('turnTransition');
+      if(!el) return;
+      var elmP = document.getElementById('ttPlayer');
+      var elmPh = document.getElementById('ttPhase');
+      if(elmP) elmP.textContent = nextPlayer || '';
+      if(elmPh) elmPh.textContent = (phase === 'drawing' ? 'Drawing' : 'Guessing');
+      // Pause Community Doodle inputs while overlay is up
+      try { hideCommunity(); } catch(e){}
+      el.style.display = 'flex';
+      setTimeout(function(){
+        el.style.display = 'none';
+        // Waiters will naturally get routed back to the waiting screen by existing router,
+        // and Community Doodle will re-show there.
+      }, 3000);
+    }catch(e){ console.error(e); }
+  }
 
-    ov.style.display = 'flex';
+  function handleTransitionOverlay(room){
+    if(!room) return;
+    var order = room.order || [];
+    var idx = room.currentIndex || 0;
+    var current = order[idx] || '';
+    var phase = room.state || '';
+    var key = (function(){
+      var idx = room && room.currentIndex || 0;
+      var phase = room && room.state || '';
+      var ts = room && room.turnStart || 0;
+      return phase + '#' + idx + '#' + ts;
+    })();
 
-    // live countdown
-    if (__transitionTimer) clearInterval(__transitionTimer);
-    __transitionTimer = setInterval(()=>{
-      const now = getServerNow();
-      const remainingMs = Math.max(0, (info?.until || 0) - now);
-      const sec = Math.ceil(remainingMs/1000);
-      if (c) c.textContent = sec;
-      if (remainingMs <= 0){
-        clearInterval(__transitionTimer);
-        __transitionTimer = null;
-        // Try to promote state atomically (any client may do this)
-        promoteAfterTransition();
+    if(key && key !== lastTurnKeySeenForOverlay){
+      lastTurnKeySeenForOverlay = key;
+      // Only show overlay in active phases and only for players who are NOT up
+      var myTurn = (current === (window.username || ''));
+      if((phase === 'drawing' || phase === 'guessing') && !myTurn){
+        showTurnTransition(current, phase);
       }
-    }, 200);
-  } catch(e){ console.error(e); }
-}
-function hideTurnTransition(){
-  const ov = document.getElementById('turnTransitionOverlay');
-  if(ov) ov.style.display = 'none';
-}
-function promoteAfterTransition(){
-  if(!roomCode) return;
-  const ref = db.ref('rooms/'+roomCode);
-  ref.transaction(room => {
-    if (!room || room.state !== 'turnTransition' || !room.transition) return room;
-    const now = Date.now() + (window.serverOffset || 0);
-    if (now < (room.transition.until || 0)) return room; // not yet
-    const nxt = room.transition.nextState;
-    const idx = room.transition.idx ?? (room.currentIndex || 0);
-    // Apply transition -> next state
-    room.transition = null;
-    room.state = nxt;
-    if (nxt === 'drawing'){
-      // entering drawing for idx (already computed as next drawer)
-      room.currentIndex = idx;
     }
-    room.turnStart = (firebase.database && firebase.database.ServerValue)
-      ? firebase.database.ServerValue.TIMESTAMP
-      : Date.now();
-    return room;
-  });
-}
+  }
+
+  // Attach a second passive listener once we have a roomCode
+  var attachTimer = setInterval(function(){
+    try{
+      if(!overlayListenerAttached && window.roomCode){
+        var ref = firebase.database().ref('rooms/' + window.roomCode);
+        ref.on('value', function(snap){ handleTransitionOverlay(snap.val()); });
+        overlayListenerAttached = true;
+        clearInterval(attachTimer);
+      }
+    }catch(e){ /* try again next tick */ }
+  }, 400);
+})();
 </script>
+<!-- ===== End Turn Transition Overlay ===== -->
 
 </body>
 </html>
