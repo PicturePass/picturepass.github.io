@@ -1329,5 +1329,63 @@ function trySaveCommunityFinal(room){
 </script>
 
 
+
+<!-- === Turn-change stroke squelch (prevents diagonal to bottom-right) === -->
+<script>
+(function(){
+  var lastKey = null;
+  var squelchUntil = 0;
+
+  // Capture-phase pointermove squelch for a very short window
+  document.addEventListener('pointermove', function(e){
+    if(Date.now() < squelchUntil){
+      try { e.stopImmediatePropagation(); } catch(_) {}
+      try { e.preventDefault(); } catch(_) {}
+    }
+  }, true);
+
+  function endAnyStroke(){
+    // Flip common flags some canvases use
+    try{ if(typeof window.isDrawing !== 'undefined') window.isDrawing = false; }catch(_){}
+    try{ if(typeof window.isDrawingCommunity !== 'undefined') window.isDrawingCommunity = false; }catch(_){}
+    try{ if(typeof window.drawing !== 'undefined') window.drawing = false; }catch(_){}
+    // Reset paths on all canvases defensively
+    try{
+      var canvases = document.querySelectorAll('canvas');
+      canvases.forEach(function(c){
+        try{ var ctx = c.getContext && c.getContext('2d'); if(ctx && ctx.beginPath) ctx.beginPath(); }catch(_){}
+        try{ c.releasePointerCapture && c.releasePointerCapture && c.releasePointerCapture(1); }catch(_){}
+      });
+    }catch(_){}
+    // Tiny squelch window to swallow any late pointermove from the OS/browser
+    squelchUntil = Date.now() + 350;
+  }
+
+  function handleRoom(room){
+    if(!room) return;
+    var key = (room.state||'') + '|' + (room.currentIndex||0) + '|' + (room.turnStart||0);
+    if(key !== lastKey){
+      lastKey = key;
+      // On any turn switch, forcibly end strokes to avoid diagonal artifacts
+      endAnyStroke();
+    }
+  }
+
+  // Attach to room changes
+  var attached = false;
+  var t = setInterval(function(){
+    try{
+      if(attached) return;
+      if(!window.roomCode || !window.firebase) return;
+      var ref = firebase.database().ref('rooms/' + roomCode);
+      ref.on('value', function(snap){ handleRoom(snap.val()); });
+      attached = true;
+      clearInterval(t);
+    }catch(e){}
+  }, 300);
+})();
+</script>
+<!-- === End stroke squelch === -->
+
 </body>
 </html>
