@@ -355,36 +355,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// === Atomic turn advancement helpers ===
-function txAdvanceTurn(expectedPhase, idxAtRead, tsAtStart, nextPhaseIfAny){
-  const rref = db.ref('rooms/'+roomCode);
-  return rref.transaction(function(cur){
-    if(!cur) return cur;
-    // Validate still same turn
-    if(cur.state !== expectedPhase) return cur;
-    if((cur.currentIndex||0) !== idxAtRead) return cur;
-    if((cur.turnStart||0) !== (tsAtStart||0)) return cur;
-    // Advance
-    const next = idxAtRead + 1;
-    if(next >= (cur.order||[]).length){
-      cur.state = 'results';
-      // turnStart set in follow-up update for server timestamp
-    } else {
-      cur.currentIndex = next;
-      cur.state = nextPhaseIfAny; // 'guessing' or 'drawing'
-      // turnStart set in follow-up update for server timestamp
-    }
-    return cur;
-  }).then(function(res){
-    // If committed, stamp server time for the new phase (or results)
-    // Use a single update to resolve ServerValue.TIMESTAMP on the server
-    const u = {};
-    u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-    return db.ref().update(u);
-  });
-}
-
-
 let username="", roomCode="", isHost=false, penSize=6;
 let drawInterval=null, guessInterval=null, turnTicker=null;
 let __lastCelebrationKey = null;
@@ -848,19 +818,25 @@ function startGuessTimer(room){
       const remaining = Math.max(0, duration - elapsed);
       byId('guessTimer').innerText = remaining + 's';
       if(remaining <= 0){
-  const typed = (byId('guessInput') && byId('guessInput').value) ? byId('guessInput').value.trim() : '';
-  const guessText = typed || 'No guess';
-  stopGuessTimer();
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const tsAtStart = room.turnStart || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:guessText, player:username };
-    return db.ref().update(u).then(()=> txAdvanceTurn('guessing', idx, tsAtStart, 'drawing'));
-  });
-}
-
+        const typed = (byId('guessInput') && byId('guessInput').value) ? byId('guessInput').value.trim() : '';
+        const guessText = typed || 'No guess';
+        stopGuessTimer();
+        db.ref('rooms/'+roomCode).once('value').then(s=>{
+          const room = s.val();
+          const idx = room.currentIndex || 0;
+          const u = {};
+          u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:guessText, player:username };
+          const next = idx + 1;
+          if(next >= (room.order||[]).length){
+            u['rooms/'+roomCode+'/state'] = 'results';
+          } else {
+            u['rooms/'+roomCode+'/currentIndex'] = next;
+            u['rooms/'+roomCode+'/state'] = 'drawing';
+            u['rooms/'+roomCode+'/turnStart'] = Date.now();
+          }
+          db.ref().update(u);
+        });
+      }
     };
     tick();
     guessInterval = setInterval(tick, 1000);
@@ -879,13 +855,19 @@ function submitDrawing(forced){
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
     const idx = room.currentIndex || 0;
-    const tsAtStart = room.turnStart || 0;
     const u = {};
     u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
-    return db.ref().update(u).then(()=> txAdvanceTurn('drawing', idx, tsAtStart, 'guessing'));
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      u['rooms/'+roomCode+'/state'] = 'guessing';
+      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+    }
+    db.ref().update(u);
   });
 }
-
 
 function submitGuess(){
   try {
@@ -900,13 +882,19 @@ function submitGuess(){
   db.ref('rooms/'+roomCode).once('value').then(s=>{
     const room = s.val();
     const idx = room.currentIndex || 0;
-    const tsAtStart = room.turnStart || 0;
     const u = {};
     u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
-    return db.ref().update(u).then(()=> txAdvanceTurn('guessing', idx, tsAtStart, 'drawing'));
+    const next = idx + 1;
+    if(next >= (room.order||[]).length){
+      u['rooms/'+roomCode+'/state'] = 'results';
+    } else {
+      u['rooms/'+roomCode+'/currentIndex'] = next;
+      u['rooms/'+roomCode+'/state'] = 'drawing';
+      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+    }
+    db.ref().update(u);
   });
 }
-
 
 /* ---------- Results ---------- */
 function showResults(room){
