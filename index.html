@@ -842,7 +842,8 @@ function startGuessTimer(room){
             u['rooms/'+roomCode+'/state'] = 'results';
           } else {
             u['rooms/'+roomCode+'/currentIndex'] = next;
-            u['rooms/'+roomCode+'/state'] = 'transition'; u['rooms/'+roomCode+'/turnStart'] = Date.now();
+            u['rooms/'+roomCode+'/state']='transition'; u['rooms/'+roomCode+'/__lastPhase']='drawing'; u['rooms/'+roomCode+'/turnStart']=firebase.database.ServerValue.TIMESTAMP;
+    (function(){try{var o=(window.__lastRoom&&window.__lastRoom.order)||[]; var c=o.length||0; var i=(window.__lastRoom&&window.__lastRoom.currentIndex)||0; if(c){ u['rooms/'+roomCode+'/currentIndex']=(i+1)%c; }}catch(e){}})();
           }
           db.ref().update(u);
         });
@@ -872,7 +873,8 @@ function submitDrawing(forced){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'transition'; u['rooms/'+roomCode+'/turnStart'] = Date.now();
+      u['rooms/'+roomCode+'/state']='transition'; u['rooms/'+roomCode+'/__lastPhase']='drawing'; u['rooms/'+roomCode+'/turnStart']=firebase.database.ServerValue.TIMESTAMP;
+    (function(){try{var o=(window.__lastRoom&&window.__lastRoom.order)||[]; var c=o.length||0; var i=(window.__lastRoom&&window.__lastRoom.currentIndex)||0; if(c){ u['rooms/'+roomCode+'/currentIndex']=(i+1)%c; }}catch(e){}})();
     }
     db.ref().update(u);
   });
@@ -898,7 +900,8 @@ function submitGuess(){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'transition'; u['rooms/'+roomCode+'/turnStart'] = Date.now();
+      u['rooms/'+roomCode+'/state']='transition'; u['rooms/'+roomCode+'/__lastPhase']='drawing'; u['rooms/'+roomCode+'/turnStart']=firebase.database.ServerValue.TIMESTAMP;
+    (function(){try{var o=(window.__lastRoom&&window.__lastRoom.order)||[]; var c=o.length||0; var i=(window.__lastRoom&&window.__lastRoom.currentIndex)||0; if(c){ u['rooms/'+roomCode+'/currentIndex']=(i+1)%c; }}catch(e){}})();
     }
     db.ref().update(u);
   });
@@ -1313,13 +1316,19 @@ function startLeaderLoop(){
         const ts = r.turnStart || 0;
         const order = r.order || [];
         const idx = r.currentIndex || 0;
-        const DRAW_MS = 80*1000, GUESS_MS = 40*1000, TRANS_MS = 2500;
+        const DRAW_MS = 80*1000, GUESS_MS = 40*1000, TRANS_MS = 2800;
 
         if(r.state === 'drawing' && ts && serverNow - ts >= DRAW_MS){
-          txAdvance('drawing','transition', idx, ts);
-        } else if(r.state === 'guessing' && ts && serverNow - ts >= GUESS_MS){
-          txAdvance('guessing','transition', idx, ts);
-        } else if(r.state === 'transition' && ts && serverNow - ts >= TRANS_MS){
+        txAdvance('drawing','transition', idx, ts).then(()=>{
+          const u={}; u['rooms/'+roomCode+'/turnStart']=firebase.database.ServerValue.TIMESTAMP;
+          db.ref().update(u);
+        });
+      } else if(r.state === 'guessing' && ts && serverNow - ts >= GUESS_MS){
+        txAdvance('guessing','transition', idx, ts).then(()=>{
+          const u={}; u['rooms/'+roomCode+'/turnStart']=firebase.database.ServerValue.TIMESTAMP;
+          db.ref().update(u);
+        });
+      } else if(r.state === 'transition' && ts && serverNow - ts >= TRANS_MS){
           const nextPhase = (r.__lastPhase === 'drawing') ? 'guessing' : 'drawing';
           completeTransition(nextPhase, idx, ts, r);
         }
@@ -1337,7 +1346,19 @@ function txAdvance(expectedPhase, nextPhase, idxAtRead, tsAtStart){
     if((cur.currentIndex||0) !== (idxAtRead||0)) return cur;
     if((cur.turnStart||0) !== (tsAtStart||0)) return cur;
     cur.state = nextPhase;
-    if(nextPhase === 'transition'){ cur.__lastPhase = expectedPhase; }
+    if(nextPhase === 'transition'){
+      cur.__lastPhase = expectedPhase;
+      const order = cur.order || [];
+      const count = order.length || 0;
+      if(expectedPhase === 'drawing'){
+        // next player becomes active for guessing
+        cur.currentIndex = count ? ((idxAtRead + 1) % count) : 0;
+      } else {
+        // expectedPhase === 'guessing' -> keep same index (that player becomes the next drawer)
+        cur.currentIndex = idxAtRead || 0;
+      }
+      // stamp transition start from server once we update outside
+    }
     return cur;
   }).then(()=>{});
 }
