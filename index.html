@@ -538,7 +538,7 @@ function subscribeRoom(){
   roomListenerAttached = true;
 
   db.ref('rooms/'+roomCode).on('value', snapshot=>{
-    const room = snapshot.val();
+    try{ preHandoffFreeze(snapshot.val()||{}); }catch(e){} const room = snapshot.val();
     if(!room){ alert("Room closed"); location.reload(); return; }
 
     renderTurnOrder(room);
@@ -622,7 +622,7 @@ if(room.state === 'drawing'){
 }
 
 /* ---------- Shared turn timer (unchanged) ---------- */
-function startSharedTurnTicker(room){
+function startSharedTurnTicker(room){ try{ preHandoffFreeze(room); }catch(_){} 
   stopSharedTurnTicker();
   updateTurnTimerLabels(room);
   turnTicker = setInterval(()=>updateTurnTimerLabels(room), 1000);
@@ -1087,6 +1087,48 @@ function scheduleTransitionAdvance(room){
 }
 
 
+
+/* === Injected: Community Doodle pre-handoff freeze === */
+let __cdEnabled = true;
+function enableCommunityInput(on){ __cdEnabled = !!on; }
+function cancelCommunityPointer(){
+  try{ cdDrawing=false; cdLastPoint=null; if(cdCtx&&cdCtx.beginPath) cdCtx.beginPath(); }catch(e){}
+}
+function preHandoffFreeze(room){
+  try{
+    const ts = room.turnStart || 0;
+    const state = room.state;
+    const now = getServerNow();
+    const phaseMs = (state === 'drawing') ? 80000 : (state === 'guessing') ? 40000 : 0;
+    if(!phaseMs) return;
+    const msLeft = (ts + phaseMs) - now;
+    if(msLeft <= 900){
+      // freeze inputs just before handoff
+      enableCommunityInput(false);
+      cancelCommunityPointer();
+      try{
+        if (cdCanvas){
+          // Best-effort: release pointer/touch and cancel stroke
+          if (typeof cdCanvas.releasePointerCapture === 'function' && window.__lastPointerId != null){
+            try{ cdCanvas.releasePointerCapture(window.__lastPointerId); }catch(_){}
+          }
+          ['pointercancel','mouseup','touchend','touchcancel','mouseleave'].forEach(type=>{
+            try{ cdCanvas.dispatchEvent(new Event(type)); }catch(_){}
+          });
+        }
+      }catch(e){}
+    } else {
+      // Re-enable only if it's not my active turn and not transition
+      if(room.state!=='transition'){
+        const order = room.order||[];
+        const idx = room.currentIndex||0;
+        const iAmActive = (order[idx]||'')===username;
+        if(!iAmActive) enableCommunityInput(true);
+      }
+    }
+  }catch(e){}
+}
+
 /* ---- Timer Sync Fix ---- */
 let serverOffset = 0;
 firebase.database().ref(".info/serverTimeOffset").on("value", snap => {
@@ -1174,12 +1216,12 @@ function initCommunityCanvas(){
   cdCtx = cdCanvas.getContext('2d');
   drawChalkboardBackground();
   // input handlers
-  cdCanvas.addEventListener('mousedown', e=>{ cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
-  cdCanvas.addEventListener('mousemove', e=>{ if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
+  cdCanvas.addEventListener('mousedown', e=>{ try{window.__lastPointerId = e.pointerId;}catch(_){}; if(!__cdEnabled) return; cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
+  cdCanvas.addEventListener('mousemove', e=>{ if(!__cdEnabled) return; if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
   cdCanvas.addEventListener('mouseup',   ()=>{ cdDrawing=false; cdLastPoint=null; });
   cdCanvas.addEventListener('mouseleave',()=>{ cdDrawing=false; cdLastPoint=null; });
-  cdCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
-  cdCanvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
+  cdCanvas.addEventListener('touchstart', e=>{ try{window.__lastPointerId=(e.changedTouches&&e.changedTouches[0]&&e.changedTouches[0].identifier)||0;}catch(_){}; e.preventDefault(); cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
+  cdCanvas.addEventListener('touchmove', e=>{ if(!__cdEnabled) return; e.preventDefault(); if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
   cdCanvas.addEventListener('touchend',   e=>{ e.preventDefault(); cdDrawing=false; cdLastPoint=null; }, {passive:false});
 }
 
