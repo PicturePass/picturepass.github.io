@@ -537,8 +537,9 @@ function subscribeRoom(){
   if(roomListenerAttached) return;
   roomListenerAttached = true;
 
-  db.ref('rooms/'+roomCode).on('value', snapshot=>{
-    try{ preHandoffFreeze(snapshot.val()||{}); }catch(e){} const room = snapshot.val();
+  db.ref('rooms/'+roomCode).on('value', snapshot=>{ window.__lastRoom = snapshot.val() || {};
+    try{ preHandoffFreeze(snapshot.val()||{}); }catch(e){}
+    try{ clearInterval(window.__freezeTick); window.__freezeTick = setInterval(()=>{ preHandoffFreeze(window.__lastRoom||{}); }, 250); }catch(_){ }const room = snapshot.val();
     if(!room){ alert("Room closed"); location.reload(); return; }
 
     renderTurnOrder(room);
@@ -1089,6 +1090,14 @@ function scheduleTransitionAdvance(room){
 
 
 /* === Injected: Community Doodle pre-handoff freeze === */
+
+/* Cancel any stroke when tab/app loses focus (mobile friendly) */
+try{
+  ['visibilitychange','pagehide','blur'].forEach(ev=>{
+    window.addEventListener(ev, ()=>{ try{ enableCommunityInput(false); cancelCommunityPointer(); }catch(_){ } }, {passive:true});
+  });
+}catch(_){}
+
 let __cdEnabled = true;
 function enableCommunityInput(on){ __cdEnabled = !!on; }
 function cancelCommunityPointer(){
