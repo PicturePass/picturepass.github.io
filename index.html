@@ -575,12 +575,12 @@ function subscribeRoom(){
         showOnly('drawingScreen');
         startDrawingPhase(room, idx);
         setTurnBanner("");
-        hideCommunity(); cancelCommunityPointer(); enableCommunityInput(false);
+        hideCommunity(); cancelCommunityPointer();
       } else {
         showOnly('waitScreen');
         setPhaseBanner('drawing', current);
         ensureColorAssignment(room);
-        showCommunity(room); enableCommunityInput(true);
+        showCommunity(room);
       }
       return;
     }
@@ -590,12 +590,12 @@ function subscribeRoom(){
         showOnly('guessScreen');
         startGuessingPhase(room, idx);
         setTurnBanner("");
-        hideCommunity(); cancelCommunityPointer(); enableCommunityInput(false);
+        hideCommunity(); cancelCommunityPointer();
       } else {
         showOnly('waitScreen');
         setPhaseBanner('guessing', current);
         ensureColorAssignment(room);
-        showCommunity(room); enableCommunityInput(true);
+        showCommunity(room);
       }
       return;
     }
@@ -841,10 +841,9 @@ function startGuessTimer(room){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-u['rooms/'+roomCode+'/state'] = 'transition';
-u['rooms/'+roomCode+'/__lastPhase'] = 'drawing';
-/* atomic write with nonce */
-return writeTransitionAtomic(room, u);
+      u['rooms/'+roomCode+'/state'] = 'transition';
+      u['rooms/'+roomCode+'/__lastPhase'] = 'guessing';
+      u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
     }
           db.ref().update(u);
         });
@@ -874,10 +873,9 @@ function submitDrawing(forced){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-u['rooms/'+roomCode+'/state'] = 'transition';
-u['rooms/'+roomCode+'/__lastPhase'] = 'drawing';
-/* atomic write with nonce */
-return writeTransitionAtomic(room, u);
+      u['rooms/'+roomCode+'/state'] = 'transition';
+      u['rooms/'+roomCode+'/__lastPhase'] = 'drawing';
+      u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
     }
     db.ref().update(u);
   });
@@ -903,10 +901,9 @@ function submitGuess(){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-u['rooms/'+roomCode+'/state'] = 'transition';
-u['rooms/'+roomCode+'/__lastPhase'] = 'drawing';
-/* atomic write with nonce */
-return writeTransitionAtomic(room, u);
+      u['rooms/'+roomCode+'/state'] = 'transition';
+      u['rooms/'+roomCode+'/__lastPhase'] = 'guessing';
+      u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
     }
     db.ref().update(u);
   });
@@ -1146,12 +1143,12 @@ function initCommunityCanvas(){
   cdCtx = cdCanvas.getContext('2d');
   drawChalkboardBackground();
   // input handlers
-  cdCanvas.addEventListener('mousedown', e=>{ if(!__cdEnabled) return; if(!canDrawInCommunity(window.__lastRoom||{})) return; cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
-  cdCanvas.addEventListener('mousemove', e=>{ if(!__cdEnabled) return; if(!cdDrawing) return; if(!canDrawInCommunity(window.__lastRoom||{})) { cdDrawing=false; cdLastPoint=null; return; } const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
+  cdCanvas.addEventListener('mousedown', e=>{ if(!canDrawInCommunity(window.__lastRoom||{})) return; cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
+  cdCanvas.addEventListener('mousemove', e=>{ if(!cdDrawing) return; if(!canDrawInCommunity(window.__lastRoom||{})) { cdDrawing=false; cdLastPoint=null; return; } const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
   cdCanvas.addEventListener('mouseup',   ()=>{ cdDrawing=false; cdLastPoint=null; });
   cdCanvas.addEventListener('mouseleave',()=>{ cdDrawing=false; cdLastPoint=null; });
-  cdCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); if(!__cdEnabled) return; if(!canDrawInCommunity(window.__lastRoom||{})) return; cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
-  cdCanvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!__cdEnabled) return; if(!cdDrawing) return; if(!canDrawInCommunity(window.__lastRoom||{})) { cdDrawing=false; cdLastPoint=null; return; } const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
+  cdCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); if(!canDrawInCommunity(window.__lastRoom||{})) return; cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
+  cdCanvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!cdDrawing) return; if(!canDrawInCommunity(window.__lastRoom||{})) { cdDrawing=false; cdLastPoint=null; return; } const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
   cdCanvas.addEventListener('touchend',   e=>{ e.preventDefault(); cdDrawing=false; cdLastPoint=null; }, {passive:false});
 }
 
@@ -1320,31 +1317,11 @@ function canDrawInCommunity(room){
   if(isMyTurn(room)) return false; // block doodle when it's my active turn
   return (room.state === 'drawing' || room.state === 'guessing');
 }
-
-/* Enable/disable Community Doodle input bindings fully */
-let __cdEnabled = true;
-function enableCommunityInput(on){
-  __cdEnabled = !!on;
-}
-
 function cancelCommunityPointer(){
   try{ cdDrawing=false; cdLastPoint=null; if(cdCtx&&cdCtx.beginPath) cdCtx.beginPath(); }catch(e){}
 }
 
 let __transitionTimer = null;
-
-/* === Injected: Phase nonce helpers (atomic handoff) === */
-function nextPhaseNonce(cur){ 
-  return ((cur && cur.phaseNonce)|0) + 1; 
-}
-function writeTransitionAtomic(room, updates){
-  // attach a fresh nonce so only the scheduled handoff for THIS transition applies
-  updates['rooms/'+roomCode+'/phaseNonce'] = ((room && room.phaseNonce)|0) + 1;
-  // set transition start using server time
-  updates['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-  return db.ref().update(updates);
-}
-
 function scheduleTransitionAdvance(room){
   if(__transitionTimer) { clearTimeout(__transitionTimer); __transitionTimer = null; }
   const ts = room.turnStart || 0;
