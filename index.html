@@ -538,7 +538,10 @@ function subscribeRoom(){
   roomListenerAttached = true;
 
   db.ref('rooms/'+roomCode).on('value', snapshot=>{
+    const prev = window.__lastRoom || null;
     const room = snapshot.val();
+    window.__lastRoom = room;
+    startLeaderLoop();
     if(!room){ alert("Room closed"); location.reload(); return; }
 
     renderTurnOrder(room);
@@ -574,7 +577,7 @@ function subscribeRoom(){
         showOnly('drawingScreen');
         startDrawingPhase(room, idx);
         setTurnBanner("");
-        hideCommunity();
+        hideCommunity(); cancelCommunityPointer();
       } else {
         showOnly('waitScreen');
         setPhaseBanner('drawing', current);
@@ -589,13 +592,21 @@ function subscribeRoom(){
         showOnly('guessScreen');
         startGuessingPhase(room, idx);
         setTurnBanner("");
-        hideCommunity();
+        hideCommunity(); cancelCommunityPointer();
       } else {
         showOnly('waitScreen');
         setPhaseBanner('guessing', current);
         ensureColorAssignment(room);
         showCommunity(room);
       }
+      return;
+    }
+
+    if(room.state === 'transition'){
+      showOnly('waitScreen');
+      setTurnBanner('⏱️ Switching turns…');
+      hideCommunity();
+      cancelCommunityPointer();
       return;
     }
 
@@ -831,8 +842,7 @@ function startGuessTimer(room){
             u['rooms/'+roomCode+'/state'] = 'results';
           } else {
             u['rooms/'+roomCode+'/currentIndex'] = next;
-            u['rooms/'+roomCode+'/state'] = 'drawing';
-            u['rooms/'+roomCode+'/turnStart'] = Date.now();
+            u['rooms/'+roomCode+'/state'] = 'transition'; u['rooms/'+roomCode+'/turnStart'] = Date.now();
           }
           db.ref().update(u);
         });
@@ -862,8 +872,7 @@ function submitDrawing(forced){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'guessing';
-      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+      u['rooms/'+roomCode+'/state'] = 'transition'; u['rooms/'+roomCode+'/turnStart'] = Date.now();
     }
     db.ref().update(u);
   });
@@ -889,8 +898,7 @@ function submitGuess(){
       u['rooms/'+roomCode+'/state'] = 'results';
     } else {
       u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'drawing';
-      u['rooms/'+roomCode+'/turnStart'] = Date.now();
+      u['rooms/'+roomCode+'/state'] = 'transition'; u['rooms/'+roomCode+'/turnStart'] = Date.now();
     }
     db.ref().update(u);
   });
@@ -1130,12 +1138,12 @@ function initCommunityCanvas(){
   cdCtx = cdCanvas.getContext('2d');
   drawChalkboardBackground();
   // input handlers
-  cdCanvas.addEventListener('mousedown', e=>{ cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
-  cdCanvas.addEventListener('mousemove', e=>{ if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
+  cdCanvas.addEventListener('mousedown', e=>{ if(!canDrawInCommunity(window.__lastRoom||{})) return; cdDrawing = true; cdLastPoint = getCanvasPos(e, cdCanvas); });
+  cdCanvas.addEventListener('mousemove', e=>{ if(!cdDrawing) return; if(!canDrawInCommunity(window.__lastRoom||{})) { cdDrawing=false; cdLastPoint=null; return; } const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
   cdCanvas.addEventListener('mouseup',   ()=>{ cdDrawing=false; cdLastPoint=null; });
   cdCanvas.addEventListener('mouseleave',()=>{ cdDrawing=false; cdLastPoint=null; });
-  cdCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
-  cdCanvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
+  cdCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); if(!canDrawInCommunity(window.__lastRoom||{})) return; cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
+  cdCanvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!cdDrawing) return; if(!canDrawInCommunity(window.__lastRoom||{})) { cdDrawing=false; cdLastPoint=null; return; } const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
   cdCanvas.addEventListener('touchend',   e=>{ e.preventDefault(); cdDrawing=false; cdLastPoint=null; }, {passive:false});
 }
 
@@ -1289,6 +1297,79 @@ function trySaveCommunityFinal(room){
     // Only set if still empty
     db.ref(`rooms/${roomCode}/community/finalImage`).transaction(curr => curr || dataURL);
   }).finally(()=>{ savingCommunityFinal = false; });
+}
+
+
+/* === Transition state + leader loop (injected) === */
+let __leaderTick = null;
+function startLeaderLoop(){
+  if(__leaderTick) return;
+  const loop = () => {
+    try{
+      if(!roomCode) { __leaderTick = setTimeout(loop, 400); return; }
+      db.ref('rooms/'+roomCode).once('value').then(s=>{
+        const r = s.val(); if(!r) return;
+        const serverNow = getServerNow();
+        const ts = r.turnStart || 0;
+        const order = r.order || [];
+        const idx = r.currentIndex || 0;
+        const DRAW_MS = 80*1000, GUESS_MS = 40*1000, TRANS_MS = 2500;
+
+        if(r.state === 'drawing' && ts && serverNow - ts >= DRAW_MS){
+          txAdvance('drawing','transition', idx, ts);
+        } else if(r.state === 'guessing' && ts && serverNow - ts >= GUESS_MS){
+          txAdvance('guessing','transition', idx, ts);
+        } else if(r.state === 'transition' && ts && serverNow - ts >= TRANS_MS){
+          const nextPhase = (r.__lastPhase === 'drawing') ? 'guessing' : 'drawing';
+          completeTransition(nextPhase, idx, ts, r);
+        }
+      });
+    }catch(e){}
+    __leaderTick = setTimeout(loop, 350);
+  };
+  loop();
+}
+function txAdvance(expectedPhase, nextPhase, idxAtRead, tsAtStart){
+  const ref = db.ref('rooms/'+roomCode);
+  return ref.transaction(cur=>{
+    if(!cur) return cur;
+    if(cur.state !== expectedPhase) return cur;
+    if((cur.currentIndex||0) !== (idxAtRead||0)) return cur;
+    if((cur.turnStart||0) !== (tsAtStart||0)) return cur;
+    cur.state = nextPhase;
+    if(nextPhase === 'transition'){ cur.__lastPhase = expectedPhase; }
+    return cur;
+  }).then(()=>{});
+}
+function completeTransition(nextPhase, idxAtRead, tsAtStart, snapshotRoom){
+  const ref = db.ref('rooms/'+roomCode);
+  return ref.transaction(cur=>{
+    if(!cur) return cur;
+    if(cur.state !== 'transition') return cur;
+    if((cur.turnStart||0) !== (tsAtStart||0)) return cur;
+    // Do not change index here; submit handlers already updated index when needed.
+    cur.state = nextPhase;
+    return cur;
+  }).then(()=>{
+    const u = {};
+    u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
+    return db.ref().update(u);
+  });
+}
+/* Community Doodle guards */
+function isMyTurn(room){
+  const order = room.order || [];
+  const idx = room.currentIndex || 0;
+  return (order[idx]||'') === username;
+}
+function canDrawInCommunity(room){
+  if(!room) return false;
+  if(room.state === 'transition') return false;
+  if(isMyTurn(room)) return false;
+  return (room.state === 'drawing' || room.state === 'guessing');
+}
+function cancelCommunityPointer(){
+  try{ cdDrawing = false; cdLastPoint = null; if(cdCtx && cdCtx.beginPath) cdCtx.beginPath(); }catch(e){}
 }
 
 </script>
