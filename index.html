@@ -289,7 +289,7 @@ The crazier &amp; harder to guess, the better!
 <div class="container hidden" id="resultsScreen">
 
 <!-- Print-only header for PDFs -->
-<div id="printHeader" class="print-only">
+<div id="printHeader" class="print-only" style="display:none">
   <div class="ph-title">🎨 PicturePass 🎨</div>
   <div class="ph-emoji">🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭</div>
   <div class="ph-room">Room Code: <span id="phCode"></span></div>
@@ -325,6 +325,14 @@ The crazier &amp; harder to guess, the better!
   /* Show only the Results screen in the PDF */
   body * { visibility: hidden !important; }
   #resultsScreen, #resultsScreen * { visibility: visible !important; }
+  /* Collapse top header gap & page margins */
+  html, body { margin: 0 !important; padding: 0 !important; }
+  #resultsScreen {
+    position: absolute !important;
+    top: 0 !important; left: 0 !important; right: 0 !important;
+    margin-top: 0 !important; padding-top: 0 !important;
+  }
+
   #resultsScreen { position: static !important; }
 
   /* Hide UI chrome that shouldn't appear in the PDF */
