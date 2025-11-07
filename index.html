@@ -189,6 +189,10 @@
 Zpx; }
 }
 
+
+
+/* Base: hidden on screen */
+.print-only { display: none; }
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -283,6 +287,14 @@ The crazier &amp; harder to guess, the better!
 </div>
 <!-- Results -->
 <div class="container hidden" id="resultsScreen">
+
+<!-- Print-only header for PDFs -->
+<div id="printHeader" class="print-only">
+  <div class="ph-title">🎨 PicturePass 🎨</div>
+  <div class="ph-emoji">🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭 ➜ 🖌️ ➜ 💭</div>
+  <div class="ph-room">Room Code: <span id="phCode"></span></div>
+</div>
+
 <h2 style="font-size:1.6em;color:var(--accent);">Results Summary</h2>
 <div class="finalWordRow" style="font-weight:700; font-size:1.25em"><span id="finalWordPill"><span class="pillLabel">Original Word/Phrase:</span> <span id="finalWord"></span></span></div>
 <div id="resultsList" style="margin-top:12px;"></div>
@@ -327,6 +339,34 @@ The crazier &amp; harder to guess, the better!
 
   /* Preserve colors/backgrounds in print */
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Print styling for the PDF header */
+  .print-only { 
+    display: block !important;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .print-only .ph-title {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent);
+    text-shadow: 0 1px 0 rgba(255,255,255,0.36), 0 3px 9px rgba(11,102,178,0.26), 0 2px 3px rgba(2,32,84,0.18);
+    margin: 0 0 4px;
+  }
+  .print-only .ph-emoji {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 9999px;
+    background: var(--green-oval-bg);
+    border: 2px solid var(--green-oval-border);
+    color: var(--green-text-dark);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .print-only .ph-room {
+    font-weight: 700;
+    color: var(--accent);
+  }
 }
 
 /* Optional: nice page margins */
@@ -913,7 +953,9 @@ function submitGuess(){
 /* ---------- Results ---------- */
 function showResults(room){
   showOnly('resultsScreen');
-  byId('finalWord').innerText = room.word || '';
+  
+  var ph = document.getElementById('phCode'); if (ph) ph.textContent = roomCode || (room && room.code) || '';
+byId('finalWord').innerText = room.word || '';
   const list = byId('resultsList');
   list.innerHTML = '';
   const steps = Object.keys(room.gameData||{}).map(n=>parseInt(n,10)).sort((a,b)=>a-b);
