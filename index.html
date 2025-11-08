@@ -193,6 +193,22 @@ Zpx; }
 
 /* Base: hidden on screen */
 .print-only { display: none; }
+
+  .subheader-underline {
+    display: inline-block;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    margin: 6px 0 10px;
+  }
+  .center { text-align: center; width: 100%; }
+
+  /* Amber pill for "Switching turns…" */
+  .amber-oval {
+    background: #FFE8C2;
+    border: 2px solid #FFC776;
+    color: #8B5A00;
+  }
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -222,6 +238,7 @@ Zpx; }
 <!-- Lobby -->
 <div class="container hidden" id="lobbyScreen">
 <h2>Room Code: <span id="roomCodeDisplay"></span></h2>
+<div class="subheader-underline center">List of Players:</div>
 <ul id="playerList"></ul>
 <p class="muted" id="lobbyMsg"></p>
 <button class="hidden" id="startGameBtn" onclick="startGame()">Start Game</button>
@@ -232,6 +249,7 @@ Zpx; }
 <li>Turns alternate: draw (80s) → guess (40s).</li>
 <li>Submit anytime; timer auto-submits when it ends.</li>
 <li>See the full chain at the end!</li>
+<li>Disconnect mid-game? Enter the exact same username & room code to re-join in your same spot.</li>
 <li>Optional: Use the Community Doodle while you wait—everyone not taking a turn can sketch together in real time.</li></ul>
 </div>
 <div class="turnOrderBox"><h4>Turn Order</h4><ul class="turnOrderList"></ul></div>
@@ -720,8 +738,20 @@ function setPhaseBanner(phase, player){
 }
 function setTurnBanner(text){
   const el = byId('turnBanner');
-  if(!text){ el.style.display = 'none'; el.textContent = ""; return; }
-  el.textContent = text; el.style.display = 'inline-block';
+  if(!text){
+    el.style.display = 'none';
+    el.textContent = "";
+    el.classList.remove('amber-oval');
+    return;
+  }
+  el.textContent = text;
+  el.style.display = 'inline-block';
+  // Use amber only for the "Switching turns..." message
+  if (/switching\s*turns/i.test(text)) {
+    el.classList.add('amber-oval');
+  } else {
+    el.classList.remove('amber-oval');
+  }
 }
 
 /* ---------- Player Drawing Canvas (unchanged) ---------- */
