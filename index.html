@@ -305,7 +305,7 @@ The crazier &amp; harder to guess, the better!
 <div class="resultDivider"></div>
 </div>
 <!-- Save-as-PDF button + print CSS (Results page only) -->
-<div id="exportBar" class="no-print" style="margin:16px 0; text-align:center;">
+<div id="exportBar" class="no-print no-print" style="margin:16px 0; text-align:center;">
   <button onclick="window.print()" style="
     padding:12px 18px;
     border-radius:12px;
@@ -325,14 +325,6 @@ The crazier &amp; harder to guess, the better!
   /* Show only the Results screen in the PDF */
   body * { visibility: hidden !important; }
   #resultsScreen, #resultsScreen * { visibility: visible !important; }
-  /* Collapse top header gap & page margins */
-  html, body { margin: 0 !important; padding: 0 !important; }
-  #resultsScreen {
-    position: absolute !important;
-    top: 0 !important; left: 0 !important; right: 0 !important;
-    margin-top: 0 !important; padding-top: 0 !important;
-  }
-
   #resultsScreen { position: static !important; }
 
   /* Hide UI chrome that shouldn't appear in the PDF */
@@ -375,13 +367,24 @@ The crazier &amp; harder to guess, the better!
     font-weight: 700;
     color: var(--accent);
   }
+
+  /* Remove any first-child top spacing */
+  #resultsScreen > *:first-child { margin-top: 0 !important; padding-top: 0 !important; }
+
+  /* Collapse page margins and pin results to the top */
+  html, body { margin: 0 !important; padding: 0 !important; }
+  #resultsScreen {
+    position: absolute !important;
+    top: 0 !important; left: 0 !important; right: 0 !important;
+    margin-top: 0 !important; padding-top: 0 !important;
+  }
 }
 
 /* Optional: nice page margins */
-@page { margin: 16mm; }
+@page { margin: 6mm 10mm; }
 </style>
 
-<div id="restartBox">
+<div class="no-print" id="restartBox">
 <p><b>Ready for another round?</b><br/>
       Restart with the same players and shuffle everyone (including the host).</p>
 <button onclick="restartGame()">🔁 Restart Game</button>
