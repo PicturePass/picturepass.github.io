@@ -200,14 +200,15 @@ Zpx; }
     text-decoration: underline;
     text-underline-offset: 4px;
     margin: 6px 0 10px;
+    font-size: 1.2em; /* between h2 and list items */
   }
   .center { text-align: center; width: 100%; }
 
-  /* Amber pill for "Switching turns…" */
-  .amber-oval {
-    background: #FFE8C2;
-    border: 2px solid #FFC776;
-    color: #8B5A00;
+  /* Purple pill for "Switching turns…" (overrides id styles) */
+  .purple-oval {
+    background: #EAD8FF !important;
+    border: 2px solid #CBA5FF !important;
+    color: #4B2A91 !important;
   }
 </style>
 
@@ -741,16 +742,16 @@ function setTurnBanner(text){
   if(!text){
     el.style.display = 'none';
     el.textContent = "";
-    el.classList.remove('amber-oval');
+    el.classList.remove('purple-oval');
     return;
   }
   el.textContent = text;
   el.style.display = 'inline-block';
-  // Use amber only for the "Switching turns..." message
+  // Use purple only for the "Switching turns..." message
   if (/switching\s*turns/i.test(text)) {
-    el.classList.add('amber-oval');
+    el.classList.add('purple-oval');
   } else {
-    el.classList.remove('amber-oval');
+    el.classList.remove('purple-oval');
   }
 }
 
