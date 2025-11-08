@@ -1497,26 +1497,52 @@ function trySaveCommunityFinal(room){
 
 
 
+
 <script>
-// Auto-toggle purple style for the turn banner based on its current text, no matter who updates it.
+/* Robust auto-toggle for turn banner color.
+   - Works if #turnBanner text changes,
+   - Works if the node is replaced or re-rendered,
+   - Keeps purple ONLY for "Switching turns...".
+*/
 (function(){
   function onReady(fn){ if(document.readyState!='loading'){fn();} else {document.addEventListener('DOMContentLoaded',fn);} }
+
   onReady(function(){
-    var pill = document.getElementById('turnBanner');
-    if(!pill) return;
-    function refresh(){
-      var t = (pill.textContent||'').trim();
-      if (/switching\s*turns/i.test(t)) {
-        pill.classList.add('purple-oval');
-      } else {
-        pill.classList.remove('purple-oval');
-      }
+    var pill = null, moText = null, moDom = null, interval = null;
+
+    function isSwitching(t){
+      return /switching\s*turns/i.test((t||"").trim());
     }
-    // Initial check
-    refresh();
-    // Watch for any text/child changes
-    var mo = new MutationObserver(refresh);
-    mo.observe(pill, {characterData:true, childList:true, subtree:true});
+
+    function apply(){
+      if(!pill) return;
+      var t = (pill.innerText || pill.textContent || "").trim();
+      if(isSwitching(t)){ pill.classList.add('purple-oval'); }
+      else { pill.classList.remove('purple-oval'); }
+    }
+
+    function bind(){
+      var el = document.getElementById('turnBanner');
+      if(!el || el === pill) return;
+      pill = el;
+      apply();
+      if(moText) moText.disconnect();
+      moText = new MutationObserver(apply);
+      moText.observe(pill, {characterData:true, childList:true, subtree:true});
+    }
+
+    // Watch the whole document for a (re)created #turnBanner
+    moDom = new MutationObserver(function(){
+      bind();
+    });
+    moDom.observe(document.documentElement, {childList:true, subtree:true});
+
+    // Periodic sanity check (handles text changes via direct styles or timers)
+    interval = setInterval(apply, 400);
+
+    // Initial
+    bind();
+    apply();
   });
 })();
 </script>
