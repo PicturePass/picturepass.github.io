@@ -1496,5 +1496,30 @@ function trySaveCommunityFinal(room){
 </script>
 
 
+
+<script>
+// Auto-toggle purple style for the turn banner based on its current text, no matter who updates it.
+(function(){
+  function onReady(fn){ if(document.readyState!='loading'){fn();} else {document.addEventListener('DOMContentLoaded',fn);} }
+  onReady(function(){
+    var pill = document.getElementById('turnBanner');
+    if(!pill) return;
+    function refresh(){
+      var t = (pill.textContent||'').trim();
+      if (/switching\s*turns/i.test(t)) {
+        pill.classList.add('purple-oval');
+      } else {
+        pill.classList.remove('purple-oval');
+      }
+    }
+    // Initial check
+    refresh();
+    // Watch for any text/child changes
+    var mo = new MutationObserver(refresh);
+    mo.observe(pill, {characterData:true, childList:true, subtree:true});
+  });
+})();
+</script>
+
 </body>
 </html>
