@@ -186,10 +186,6 @@
   }
 
 
-Zpx; }
-}
-
-
 
 /* Base: hidden on screen */
 .print-only { display: none; }
@@ -468,6 +464,11 @@ const phrases = [
 ];
 
 const byId = id => document.getElementById(id);
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+  });
+}
 function showOnly(id){
   ["homeScreen","lobbyScreen","wordSelectScreen","drawingScreen","guessScreen","waitScreen","resultsScreen"]
     .forEach(el=>byId(el).classList.add("hidden"));
@@ -477,43 +478,81 @@ function shuffle(arr){ for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.r
 function setBanner(code){ byId('bannerCode').textContent = code; byId('roomBanner').style.display='block'; }
 function resetToHome(){ location.reload(); }
 
+let __presenceSetup = false;
 function setupPresence(){
   if(!roomCode || !username) return;
+  if(__presenceSetup) return;
+  __presenceSetup = true;
   const connRef = db.ref(`rooms/${roomCode}/connections/${username}`);
-  connRef.set(true);
-  connRef.onDisconnect().remove();
+  const infoRef = db.ref('.info/connected');
+  // Re-establish presence (and the auto-remove-on-disconnect) every time the
+  // socket (re)connects, so a brief network blip doesn't read as a permanent drop.
+  infoRef.on('value', function(snap){
+    if(snap.val() === true){
+      connRef.onDisconnect().remove().then(function(){ connRef.set(true); }).catch(function(){});
+    }
+  });
 }
 
 /* ---------- Create / Join ---------- */
+function generateRoomCode(){
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for(let i=0;i<4;i++){ code += alphabet[Math.floor(Math.random()*alphabet.length)]; }
+  return code;
+}
+
 function createRoom(){
   username = byId('usernameInput').value.trim();
   if(!username) return alert("Enter a username first");
   isHost = true;
-  roomCode = Math.random().toString(36).substring(2,6).toUpperCase();
-  setBanner(roomCode);
   const now = Date.now();
-  const roomsRef = db.ref('rooms');
-  roomsRef.once('value').then(snapshot=>{
-    snapshot.forEach(roomSnap=>{
-      const room = roomSnap.val();
-      if (room && room.createdAt && (now - room.createdAt > 24*60*60*1000)) {
-        roomSnap.ref.remove();
-      }
-    });
-  }).then(()=>{
-    return db.ref('rooms/'+roomCode).set({
+
+  function newRoomPayload(){
+    return {
       host: username, players: [username], state:'lobby',
       createdAt: now,
       order: null, currentIndex: 0, gameData:{}, word:null, turnStart:null,
       connections: {},
       colorMap: {},               // user -> color (persist across rounds)
       community: { round: 0 }     // meta for Community Doodle
+    };
+  }
+
+  // Atomically claim an unused 4-char room code; retry on the (rare) collision.
+  function claimRoomCode(attempt){
+    if(attempt >= 8){ alert("Couldn't create a room right now. Please try again."); return; }
+    const candidate = generateRoomCode();
+    const ref = db.ref('rooms/'+candidate);
+    ref.transaction(function(cur){
+      // Returning undefined aborts the transaction (code already taken).
+      return (cur === null) ? newRoomPayload() : undefined;
+    }).then(function(res){
+      if(!res.committed){ claimRoomCode(attempt+1); return; }
+      roomCode = candidate;
+      setBanner(roomCode);
+      setupPresence();
+      subscribeRoom();
+      showLobby();
+    }).catch(function(err){
+      console.error("createRoom failed:", err);
+      alert("Couldn't create the room. Please try again.");
     });
-  }).then(()=>{
-    setupPresence();
-    subscribeRoom();
-    showLobby();
-  });
+  }
+
+  // Wait for anonymous auth so reads/writes aren't rejected (permission_denied),
+  // then best-effort cleanup of rooms older than 24h, then claim a code.
+  (window.authReady || Promise.resolve()).then(function(){
+    return db.ref('rooms').once('value');
+  }).then(function(snapshot){
+    snapshot.forEach(function(roomSnap){
+      const room = roomSnap.val();
+      if (room && room.createdAt && (now - room.createdAt > 24*60*60*1000)) {
+        roomSnap.ref.remove();
+      }
+    });
+  }).catch(function(){ /* ignore cleanup errors */ })
+    .then(function(){ claimRoomCode(0); });
 }
 
 function joinRoomPrompt(){
@@ -525,7 +564,9 @@ function joinRoomPrompt(){
   setBanner(roomCode);
 
   const roomRef = db.ref('rooms/'+roomCode);
-  roomRef.once('value').then(s=>{
+  (window.authReady || Promise.resolve()).then(function(){
+    return roomRef.once('value');
+  }).then(function(s){
     if(!s.exists()){ alert("Room not found"); return; }
     const r = s.val();
     const now = Date.now();
@@ -534,39 +575,49 @@ function joinRoomPrompt(){
       roomRef.remove();
       return;
     }
-    const players = r.players || [];
-    if(!players.includes(username)) players.push(username);
-    return roomRef.child('players').set(players).then(() => {
+    // Append this player atomically so simultaneous joins can't overwrite each other.
+    // (If the username is already present, this is a no-op re-join into the same spot.)
+    return roomRef.child('players').transaction(function(players){
+      const list = players || [];
+      if(list.indexOf(username) === -1){ list.push(username); }
+      return list;
+    }).then(function(res){
+      if(res && res.committed === false){
+        alert("Couldn't join the room. Please try again.");
+        return;
+      }
       isHost = false;
       setupPresence();
       subscribeRoom();
       showLobby();
     });
+  }).catch(function(err){
+    console.error("joinRoom failed:", err);
+    alert("Couldn't join the room. Please try again.");
   });
 }
 
 /* ---------- Lobby ---------- */
-function showLobby(){
+function showLobby(room){
   showOnly('lobbyScreen');
   byId('roomCodeDisplay').innerText = roomCode;
-  const listEl = byId('playerList');
+  // Render from the room object the main listener already gives us.
+  // No extra .on() here, so listeners don't stack and drop-status stays live.
+  renderLobby(room || window.__lastRoom || {});
+}
 
-  db.ref(`rooms/${roomCode}/players`).on('value', snap=>{
-    const list = snap.val() || [];
-    db.ref(`rooms/${roomCode}/connections`).once('value').then(csnap=>{
-      const connMap = csnap.val()||{};
-      const connected = Object.keys(connMap);
-      listEl.innerHTML = list.map(p=>{
-        const isConnected = connected.includes(p);
-        return `<li class="${isConnected?'' : 'disconnected'}">${p}${isConnected?'' : ' (Disconnected)'}</li>`;
-      }).join("");
-      const canStart = isHost && list.length >= 2 && list.length <= 15;
-      byId('startGameBtn').classList.toggle('hidden', !canStart);
-      byId('lobbyMsg').innerText = isHost
-        ? "A minimum of 2 players are needed to start, and you can have up to 15 total."
-        : "Waiting for the host to start the game once everyone has joined and is ready.";
-    });
-  });
+function renderLobby(room){
+  const list = room.players || [];
+  const connected = Object.keys(room.connections || {});
+  byId('playerList').innerHTML = list.map(function(p){
+    const isConnected = connected.indexOf(p) !== -1;
+    return `<li class="${isConnected?'' : 'disconnected'}">${escapeHtml(p)}${isConnected?'' : ' (Disconnected)'}</li>`;
+  }).join("");
+  const canStart = isHost && list.length >= 2 && list.length <= 15;
+  byId('startGameBtn').classList.toggle('hidden', !canStart);
+  byId('lobbyMsg').innerText = isHost
+    ? "A minimum of 2 players are needed to start, and you can have up to 15 total."
+    : "Waiting for the host to start the game once everyone has joined and is ready.";
 }
 
 function startGame(){
@@ -612,10 +663,24 @@ function subscribeRoom(){
     try{ clearInterval(window.__freezeTick); window.__freezeTick = setInterval(()=>{ preHandoffFreeze(window.__lastRoom||{}); }, 250); }catch(_){ }const room = snapshot.val();
     if(!room){ alert("Room closed"); location.reload(); return; }
 
+    // Doodle strokes live under the room node, so every community segment fires this
+    // listener. Only do the heavy re-render / routing when something that affects the
+    // turn UI actually changed; the per-second ticker and the stroke listener handle
+    // the rest. This kills the per-segment churn that made the doodle glitch.
+    const __sig = [
+      room.state, room.currentIndex, (room.order||[]).join(','), room.turnStart,
+      (room.community && room.community.round),
+      !!(room.community && room.community.finalImage),
+      (room.players||[]).join(','),
+      Object.keys(room.connections||{}).sort().join(',')
+    ].join('|');
+    if(__sig === window.__lastRoutingSig){ return; }
+    window.__lastRoutingSig = __sig;
+
     renderTurnOrder(room);
     startSharedTurnTicker(room);
 
-    if(room.state === 'lobby'){ showLobby(); return; }
+    if(room.state === 'lobby'){ showLobby(room); return; }
 
     if(room.state === 'wordSelect'){
       // New round setup: clear local buffers so nothing carries over
@@ -724,6 +789,7 @@ function updateTurnTimerLabels(room){
       list.appendChild(li);
     });
   });
+  try { maybeSkipDisconnectedActive(room); } catch(_){}
 }
 function renderTurnOrder(room){
   const boxes = document.querySelectorAll('.turnOrderBox');
@@ -914,22 +980,7 @@ function startGuessTimer(room){
         const typed = (byId('guessInput') && byId('guessInput').value) ? byId('guessInput').value.trim() : '';
         const guessText = typed || 'No guess';
         stopGuessTimer();
-        db.ref('rooms/'+roomCode).once('value').then(s=>{
-          const room = s.val();
-          const idx = room.currentIndex || 0;
-          const u = {};
-          u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:guessText, player:username };
-          const next = idx + 1;
-          if(next >= (room.order||[]).length){
-            u['rooms/'+roomCode+'/state'] = 'results';
-          } else {
-            u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'transition';
-      u['rooms/'+roomCode+'/__lastPhase'] = 'guessing';
-      u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-          }
-          db.ref().update(u);
-        });
+        advanceTurn('guessing', guessText);
       }
     };
     tick();
@@ -946,22 +997,7 @@ function submitDrawing(forced){
   }
   stopDrawTimer();
   const dataURL = canvas.toDataURL('image/png');
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'draw', data:dataURL, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'transition';
-      u['rooms/'+roomCode+'/__lastPhase'] = 'drawing';
-      u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-    }
-    db.ref().update(u);
-  });
+  advanceTurn('drawing', dataURL);
 }
 
 function submitGuess(){
@@ -973,23 +1009,7 @@ function submitGuess(){
   const val = (byId('guessInput').value || '').trim();
   if(!val){ alert("Please type a guess (or wait for the timer to auto-submit)."); return; }
   stopGuessTimer();
-  const g = val;
-  db.ref('rooms/'+roomCode).once('value').then(s=>{
-    const room = s.val();
-    const idx = room.currentIndex || 0;
-    const u = {};
-    u['rooms/'+roomCode+'/gameData/'+idx] = { type:'guess', data:g, player:username };
-    const next = idx + 1;
-    if(next >= (room.order||[]).length){
-      u['rooms/'+roomCode+'/state'] = 'results';
-    } else {
-      u['rooms/'+roomCode+'/currentIndex'] = next;
-      u['rooms/'+roomCode+'/state'] = 'transition';
-      u['rooms/'+roomCode+'/__lastPhase'] = 'guessing';
-      u['rooms/'+roomCode+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
-    }
-    db.ref().update(u);
-  });
+  advanceTurn('guessing', val);
 }
 
 /* ---------- Results ---------- */
@@ -1183,6 +1203,8 @@ try{
 }catch(_){}
 
 let __cdEnabled = true;
+const CD_FREEZE_MS = 900;   // auto "pens down" this long before the phase ends (no on-screen timer)
+let __cdPhaseKey = null;    // identifies the current waiting phase for the doodle
 function enableCommunityInput(on){ __cdEnabled = !!on; }
 function cancelCommunityPointer(){
   try{ cdDrawing=false; cdLastPoint=null; if(cdCtx&&cdCtx.beginPath) cdCtx.beginPath(); }catch(e){}
@@ -1195,7 +1217,7 @@ function preHandoffFreeze(room){
     const phaseMs = (state === 'drawing') ? 80000 : (state === 'guessing') ? 40000 : 0;
     if(!phaseMs) return;
     const msLeft = (ts + phaseMs) - now;
-    if(msLeft <= 900){
+    if(msLeft <= CD_FREEZE_MS){
       // freeze inputs just before handoff
       enableCommunityInput(false);
       cancelCommunityPointer();
@@ -1228,6 +1250,104 @@ firebase.database().ref(".info/serverTimeOffset").on("value", snap => {
   serverOffset = snap.val() || 0;
 });
 function getServerNow() { return Date.now() + serverOffset; }
+
+// How long past a player's full turn clock we wait, while they're disconnected,
+// before removing them from the order so the game can continue.
+const SKIP_GRACE_MS = 5000;
+
+// Single, race-safe way to record a submission and advance the turn.
+// Uses turnStart as a compare-and-swap "turn token": if the turn has already
+// moved on (someone advanced it, or a disconnected player was skipped), this
+// aborts instead of corrupting the chain. gameData/<idx> is written on its own
+// path, so image blobs are never rewritten.
+function advanceTurn(expectedPhase, data){
+  const me = username;
+  const base = 'rooms/'+roomCode;
+  return db.ref(base).once('value').then(function(s){
+    const room = s.val() || {};
+    if(room.state !== expectedPhase) return;      // turn already moved on
+    const order = room.order || [];
+    const idx = room.currentIndex || 0;
+    if(order[idx] !== me) return;                 // no longer my turn (e.g. I was skipped)
+    const expectedTs = room.turnStart || 0;
+    return db.ref(base+'/turnStart').transaction(function(cur){
+      if((cur||0) !== expectedTs) return;         // token changed → abort
+      return Date.now();                          // claim (transient; overwritten just below)
+    }).then(function(res){
+      if(!res || !res.committed) return;          // lost the claim → do nothing
+      const next = idx + 1;
+      const u = {};
+      u[base+'/gameData/'+idx] = { type: expectedPhase === 'drawing' ? 'draw' : 'guess', data: data, player: me };
+      if(next >= order.length){
+        u[base+'/state'] = 'results';
+        u[base+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
+      } else {
+        u[base+'/currentIndex'] = next;
+        u[base+'/state'] = 'transition';
+        u[base+'/__lastPhase'] = expectedPhase;
+        u[base+'/turnStart'] = firebase.database.ServerValue.TIMESTAMP;
+      }
+      return db.ref().update(u);
+    });
+  }).catch(function(err){ console.error("advanceTurn failed:", err); });
+}
+
+// Watchdog trigger (runs from the shared 1s ticker on every connected client).
+// Only fires the authoritative transaction when the active player looks gone and
+// their whole turn clock + grace has elapsed. The transaction re-validates.
+let __skipInFlight = false;
+function maybeSkipDisconnectedActive(room){
+  try {
+    if(__skipInFlight || !room) return;
+    const state = room.state;
+    if(state !== 'drawing' && state !== 'guessing') return;
+    const order = room.order || [];
+    const idx = room.currentIndex || 0;
+    const active = order[idx];
+    if(!active || !room.turnStart) return;
+    const connected = room.connections ? Object.keys(room.connections) : [];
+    if(connected.indexOf(active) !== -1) return;  // active player is connected → nothing to do
+    const dur = getPhaseDuration(state) * 1000;
+    if(getServerNow() < room.turnStart + dur + SKIP_GRACE_MS) return; // give them their turn + grace
+    __skipInFlight = true;
+    skipDisconnectedActive().catch(function(){}).then(function(){ __skipInFlight = false; });
+  } catch(_){}
+}
+
+// Authoritative, idempotent skip: remove the disconnected active player from the
+// order (everyone behind moves up into the same slot/phase), or end the game if
+// no one is left to take the slot. Guarded so only one client actually commits.
+function skipDisconnectedActive(){
+  const ref = db.ref('rooms/'+roomCode);
+  return ref.transaction(function(room){
+    if(!room) return room;
+    const state = room.state;
+    if(state !== 'drawing' && state !== 'guessing') return;         // abort (not an active turn)
+    const order = room.order || [];
+    const idx = room.currentIndex || 0;
+    const active = order[idx];
+    if(!active) return;
+    const connected = room.connections ? Object.keys(room.connections) : [];
+    if(connected.indexOf(active) !== -1) return;                    // reconnected → abort
+    const dur = getPhaseDuration(state) * 1000;
+    if(getServerNow() < (room.turnStart||0) + dur + SKIP_GRACE_MS) return; // clock not up yet → abort
+    order.splice(idx, 1);                                           // drop them; others move up
+    room.order = order;
+    room.turnStart = Date.now();                                   // invalidates stale submits; fresh clock
+    if(idx >= order.length){
+      room.state = 'results';                                      // no one left for this slot → end
+    }
+    // else: same phase continues at this index for the moved-up player
+    return room;
+  }).then(function(res){
+    if(res && res.committed){
+      const val = (res.snapshot && res.snapshot.val()) || {};
+      if(val.state !== 'results'){
+        return db.ref('rooms/'+roomCode+'/turnStart').set(firebase.database.ServerValue.TIMESTAMP);
+      }
+    }
+  }).catch(function(err){ console.error("skip failed:", err); });
+}
 
 
 /* ===================== Community Doodle ===================== */
@@ -1313,7 +1433,7 @@ function initCommunityCanvas(){
   cdCanvas.addEventListener('mousemove', e=>{ if(!__cdEnabled) return; if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; });
   cdCanvas.addEventListener('mouseup',   ()=>{ cdDrawing=false; cdLastPoint=null; });
   cdCanvas.addEventListener('mouseleave',()=>{ cdDrawing=false; cdLastPoint=null; });
-  cdCanvas.addEventListener('touchstart', e=>{ try{window.__lastPointerId=(e.changedTouches&&e.changedTouches[0]&&e.changedTouches[0].identifier)||0;}catch(_){}; e.preventDefault(); cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
+  cdCanvas.addEventListener('touchstart', e=>{ try{window.__lastPointerId=(e.changedTouches&&e.changedTouches[0]&&e.changedTouches[0].identifier)||0;}catch(_){}; if(!__cdEnabled) return; e.preventDefault(); cdDrawing=true; cdLastPoint = getCanvasPos(e, cdCanvas); }, {passive:false});
   cdCanvas.addEventListener('touchmove', e=>{ if(!__cdEnabled) return; e.preventDefault(); if(!cdDrawing) return; const p = getCanvasPos(e, cdCanvas); pushCdSegment(cdLastPoint, p); cdLastPoint = p; }, {passive:false});
   cdCanvas.addEventListener('touchend',   e=>{ e.preventDefault(); cdDrawing=false; cdLastPoint=null; }, {passive:false});
 }
@@ -1399,6 +1519,7 @@ function drawSegment(seg){
 
 function pushCdSegment(p1, p2){
   if(!roomCode) return;
+  if(!__cdEnabled) return;
   // Clamp + ignore tiny jitters
   if(!p1 || !p2) return;
   const dx = p2.x - p1.x, dy = p2.y - p1.y;
@@ -1423,16 +1544,29 @@ function pushCdSegment(p1, p2){
 function showCommunity(room){
   const sec = byId('communityDoodleSection');
   if(!sec) return;
-  buildCdTitle();
   sec.classList.remove('hidden');
   initCommunityCanvas();
-  attachCommunityListeners(room);
-  // color UI
-  setLocalColor((room.colorMap||{})[username] || myCommunityColor);
+  const round = (room.community && room.community.round) || 0;
+  const key = round + '|' + room.state + '|' + (room.currentIndex||0);
+  if(key !== __cdPhaseKey){
+    // New waiting phase: start clean, allow drawing (the freeze tick stops it near the end).
+    __cdPhaseKey = key;
+    buildCdTitle();
+    cdDrawing = false; cdLastPoint = null;
+    enableCommunityInput(true);
+    attachCommunityListeners(room);
+    setLocalColor((room.colorMap||{})[username] || myCommunityColor);
+  }
 }
 function hideCommunity(){
   const sec = byId('communityDoodleSection');
   if(sec) sec.classList.add('hidden');
+  // Cleanly end any in-progress stroke so an early submit / handoff can't glitch
+  // into the next phase or leave a stale point.
+  enableCommunityInput(false);
+  cdDrawing = false; cdLastPoint = null;
+  try{ if(cdCtx && cdCtx.beginPath) cdCtx.beginPath(); }catch(e){}
+  __cdPhaseKey = null;
 }
 
 /* Capture final Community Doodle image when entering results (once) */
@@ -1473,26 +1607,29 @@ function trySaveCommunityFinal(room){
 </script>
 
 <script>
-// Silent Anonymous Auth — no UI change for players
-(function() {
+// Silent Anonymous Auth — resolves window.authReady once a user is signed in.
+// The game waits on this before any DB read/write so requests aren't rejected
+// with permission_denied under rules that require auth != null.
+window.authReady = new Promise(function(resolve){
   try {
     var auth = firebase.auth();
+    var settled = false;
     auth.onAuthStateChanged(function(user) {
-      if (!user) {
+      if (user) {
+        window.currentUid = user.uid;
+        if (!settled) { settled = true; resolve(user); }
+      } else {
+        // No user yet: kick off exactly one anonymous sign-in.
         auth.signInAnonymously().catch(function(e) {
           console.error("Anonymous sign-in failed:", e);
         });
-      } else {
-        // Optional: available for ownership/membership logic later
-        window.currentUid = user.uid;
       }
     });
-    // Ensure an immediate attempt as the page loads
-    auth.signInAnonymously().catch(function(){});
   } catch (e) {
     console.error("Auth init error:", e);
+    resolve(null); // never hang the app if the auth SDK failed to load
   }
-})();
+});
 </script>
 
 
