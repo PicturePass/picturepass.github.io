@@ -1253,7 +1253,7 @@ function getServerNow() { return Date.now() + serverOffset; }
 
 // How long past a player's full turn clock we wait, while they're disconnected,
 // before removing them from the order so the game can continue.
-const SKIP_GRACE_MS = 5000;
+const SKIP_GRACE_MS = 4000;  // skip a disconnected active player this long after the drop is first detected
 
 // Single, race-safe way to record a submission and advance the turn.
 // Uses turnStart as a compare-and-swap "turn token": if the turn has already
@@ -1296,19 +1296,26 @@ function advanceTurn(expectedPhase, data){
 // Only fires the authoritative transaction when the active player looks gone and
 // their whole turn clock + grace has elapsed. The transaction re-validates.
 let __skipInFlight = false;
+let __missingKey = null;   // "<turnStart>|<activePlayer>" currently being timed as missing
+let __missingSince = 0;    // server time we first noticed the active player missing
 function maybeSkipDisconnectedActive(room){
   try {
-    if(__skipInFlight || !room) return;
+    if(!room) return;
     const state = room.state;
-    if(state !== 'drawing' && state !== 'guessing') return;
+    if((state !== 'drawing' && state !== 'guessing') || !room.turnStart){ __missingKey = null; return; }
     const order = room.order || [];
     const idx = room.currentIndex || 0;
     const active = order[idx];
-    if(!active || !room.turnStart) return;
+    if(!active){ __missingKey = null; return; }
     const connected = room.connections ? Object.keys(room.connections) : [];
-    if(connected.indexOf(active) !== -1) return;  // active player is connected → nothing to do
-    const dur = getPhaseDuration(state) * 1000;
-    if(getServerNow() < room.turnStart + dur + SKIP_GRACE_MS) return; // give them their turn + grace
+    if(connected.indexOf(active) !== -1){ __missingKey = null; return; } // connected → cancel any pending skip
+    // Active player is gone. Time a short grace from when we FIRST noticed them missing
+    // (not from their full turn clock), so the game advances quickly on a real drop while a
+    // brief blip that reconnects within the grace is left alone.
+    const key = room.turnStart + '|' + active;
+    if(__missingKey !== key){ __missingKey = key; __missingSince = getServerNow(); return; }
+    if((getServerNow() - __missingSince) < SKIP_GRACE_MS) return;        // still within grace
+    if(__skipInFlight) return;
     __skipInFlight = true;
     skipDisconnectedActive().catch(function(){}).then(function(){ __skipInFlight = false; });
   } catch(_){}
@@ -1329,8 +1336,7 @@ function skipDisconnectedActive(){
     if(!active) return;
     const connected = room.connections ? Object.keys(room.connections) : [];
     if(connected.indexOf(active) !== -1) return;                    // reconnected → abort
-    const dur = getPhaseDuration(state) * 1000;
-    if(getServerNow() < (room.turnStart||0) + dur + SKIP_GRACE_MS) return; // clock not up yet → abort
+    if(getServerNow() < (room.turnStart||0) + SKIP_GRACE_MS) return; // defensive floor; the watchdog enforces the real grace
     order.splice(idx, 1);                                           // drop them; others move up
     room.order = order;
     room.turnStart = Date.now();                                   // invalidates stale submits; fresh clock
